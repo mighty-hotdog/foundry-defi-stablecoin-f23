@@ -28,8 +28,11 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__TransferFailed(address from,address to,address collateralTokenAddress,uint256 amount);
 
     /* State Variables */
+    // record of all allowed collateral tokens, each mapped to their respective price feed
     mapping(address allowedTokenAddress => address tokenPriceFeed) private s_tokenToPriceFeed;
+    // record of all collateral deposits, maps the user/depositor, to the collateral token address, to the amount deposited
     mapping(address user => mapping(address collateralTokenAddress => uint256 collateralAmountDeposited)) private s_userToCollateralDeposited;
+    // Question: Is it better here to use a mapping or an array of structs?
     address private immutable i_dscToken;
 
     /* Events */
@@ -55,29 +58,29 @@ contract DSCEngine is ReentrancyGuard {
 
     /* Functions */
     constructor(
-        address[] memory acceptedCollateralTokenAddress, 
-        address[] memory collateralTokenPriceFeedAddress, 
-        address dscTokenAddress
+        address[] memory allowedCollateralTokenAddresses, 
+        address[] memory collateralTokenPriceFeedAddresses, 
+        address dscToken
         ) 
     {
-        if (dscTokenAddress == address(0)) {
+        if (dscToken == address(0)) {
             revert DSCEngine__TokenAddressCannotBeZero();
         }
-        if (acceptedCollateralTokenAddress.length != collateralTokenPriceFeedAddress.length) {
+        if (allowedCollateralTokenAddresses.length != collateralTokenPriceFeedAddresses.length) {
             revert DSCEngine__ConstructorInputParamsMismatch(
-                acceptedCollateralTokenAddress.length,
-                collateralTokenPriceFeedAddress.length);
+                allowedCollateralTokenAddresses.length,
+                collateralTokenPriceFeedAddresses.length);
         }
-        for(uint256 i=0;i<acceptedCollateralTokenAddress.length;i++) {
-            if (acceptedCollateralTokenAddress[i] == address(0)) {
+        for(uint256 i=0;i<allowedCollateralTokenAddresses.length;i++) {
+            if (allowedCollateralTokenAddresses[i] == address(0)) {
                 revert DSCEngine__CollateralTokenAddressCannotBeZero();
             }
-            if (collateralTokenPriceFeedAddress[i] == address(0)) {
+            if (collateralTokenPriceFeedAddresses[i] == address(0)) {
                 revert DSCEngine__PriceFeedAddressCannotBeZero();
             }
-            s_tokenToPriceFeed[acceptedCollateralTokenAddress[i]] = collateralTokenPriceFeedAddress[i];
+            s_tokenToPriceFeed[allowedCollateralTokenAddresses[i]] = collateralTokenPriceFeedAddresses[i];
         }
-        i_dscToken = dscTokenAddress;
+        i_dscToken = dscToken;
     }
 
     function depositCollateralMintDSC() external {}
