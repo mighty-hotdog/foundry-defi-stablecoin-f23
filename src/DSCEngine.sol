@@ -90,11 +90,15 @@ contract DSCEngine is ReentrancyGuard {
         moreThanZero(collateralAmount) 
         nonReentrant 
         {
-            // 1st update inner state (ie: records)
+            // 1st update state and send emits
             s_userToCollateralDeposited[msg.sender][collateralTokenAddress] += collateralAmount;
             emit CollateralDeposited(msg.sender,collateralTokenAddress,collateralAmount);
+
+            // then perform actual action to effect the state change
             bool success = IERC20(collateralTokenAddress).transferFrom(msg.sender,address(this),collateralAmount);
             if (!success) {
+                // Question: Will this revert also rollback the earlier statements in this function call?
+                // ie: Will the state change and the emit be rolled back too?
                 revert DSCEngine__TransferFailed(msg.sender,address(this),collateralTokenAddress,collateralAmount);
             }
         }
