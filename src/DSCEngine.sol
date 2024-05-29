@@ -98,7 +98,20 @@ contract DSCEngine is ReentrancyGuard {
             bool success = IERC20(collateralTokenAddress).transferFrom(msg.sender,address(this),collateralAmount);
             if (!success) {
                 // Question: Will this revert also rollback the earlier statements in this function call?
-                // ie: Will the state change and the emit be rolled back too?
+                //  ie: Will the state change and the emit be rolled back too?
+                // Answer: Yes. On revert, the execution of a function is terminated. All changes to the state 
+                //  variables since the beginning of the current function call are undone, returning the state 
+                //  to what it was before the function was called. This ensures transactions remain atomic and
+                //  consistent, preventing partial updates that could lead to inconsistent states.
+                //  A revert will also roll back any events emitted earlier in the same function call.
+                // Also: Upon encountering a revert, the EVM (Ethereum Virtual Machine) refunds the unused gas 
+                //  to the caller. This is to ensure that callers are not charged for operations that were not 
+                //  completed successfully.
+                // Additionally: When a contract function calls another contract and that call reverts, the 
+                //  calling function can choose to handle the revert gracefully using a try/catch block. This 
+                //  allows the caller to detect the revert and take appropriate action, such as logging the 
+                //  error or attempting alternative actions. The try/catch construct does not automatically 
+                //  revert state changes. It merely allows the caller to react to the revert condition.
                 revert DSCEngine__TransferFailed(msg.sender,address(this),collateralTokenAddress,collateralAmount);
             }
         }
