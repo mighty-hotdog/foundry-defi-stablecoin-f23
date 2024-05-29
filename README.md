@@ -11,6 +11,13 @@ Building a stablecoin in this project.
 *Ideal stablecoin is probably 1 that floats such that its purchase power tracks with
 price of real world stuff. But floating stablecoin is much more difficult to design.
 
-**Wrapped ETH and Wrapped BTC, ie: ERC20 compatible ETH and BTC. wETH and wBTC are 
-obtained by sending ETH or BTC to a conversion smart contract that issues/returns an 
-equivalent amount of wETH or wBTC.
+**Wrapped ETH and Wrapped BTC, ie: ERC20 compatible ETH and BTC. wETH is obtained by 
+sending ETH to a conversion smart contract that issues/returns an equivalent amount 
+of wETH. wBTC on the other hand is much less decentralized. Details below.
+
+"wBTC is managed by a decentralized autonomous organization (DAO), which oversees the
+system's operation. This governance model ensures transparency and security, with 
+decisions about the system's future being made collectively by its members. Regular 
+audits and proof-of-reserve transactions further enhance trust in the system by 
+verifying that the Bitcoin backing wBTC exists and is secure" 
+ - excerpt from https://www.gemini.com/cryptopedia/wbtc-what-is-wrapped-bitcoin
