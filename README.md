@@ -1,66 +1,16 @@
-## Foundry
+Building a stablecoin in this project.
+1. Relative stability: Anchored* or Pegged -> 1.00 USD
+    a. Chainlink price feeds
+    b. Setup mechanism to exchange ETH & BTC -> USD
+2. Stability mechanism (mint/burn): Algorithmic (Decentralized)
+    a. new stablecoin can only be minted with enough collateral
+3. Collateral: Exogenous (Crypto)
+    a. wETH**
+    b. wBTC**
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+*Ideal stablecoin is probably 1 that floats such that its purchase power tracks with
+price of real world stuff. But floating stablecoin is much more difficult to design.
 
-Foundry consists of:
-
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
-
-## Documentation
-
-https://book.getfoundry.sh/
-
-## Usage
-
-### Build
-
-```shell
-$ forge build
-```
-
-### Test
-
-```shell
-$ forge test
-```
-
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+**Wrapped ETH and Wrapped BTC, ie: ERC20 compatible ETH and BTC. wETH and wBTC are 
+obtained by sending ETH or BTC to a conversion smart contract that issues/returns an 
+equivalent amount of wETH or wBTC.
