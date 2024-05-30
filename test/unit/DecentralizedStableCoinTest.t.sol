@@ -40,9 +40,9 @@ contract DecentralizedStableCoinTest is Test {
     // Unit tests for transferOwnership()
     ////////////////////////////////////////////////////////////////////
     function testTransferOwnershipRequestFromNonOwner() external {
-        address REQUESTOR = makeAddr("requestor");
+        address NOTOWNER = makeAddr("not owner");
         address NEWOWNER = makeAddr("newowner");
-        vm.prank(REQUESTOR);
+        vm.prank(NOTOWNER);
         vm.expectRevert();
         coin.transferOwnership(NEWOWNER);
     }
@@ -57,10 +57,10 @@ contract DecentralizedStableCoinTest is Test {
     // Unit tests for mint()
     ////////////////////////////////////////////////////////////////////
     function testMintRequestFromNonOwner() external {
-        address REQUESTOR = makeAddr("requestor");
+        address NOTOWNER = makeAddr("not owner");
         address USER = makeAddr("user");
         uint256 mintAmount = 1e5;
-        vm.prank(REQUESTOR);
+        vm.prank(NOTOWNER);
         vm.expectRevert();
         coin.mint(USER,mintAmount);
     }
@@ -102,9 +102,9 @@ contract DecentralizedStableCoinTest is Test {
     // Unit tests for burn()
     ////////////////////////////////////////////////////////////////////
     function testBurnRequestFromNonOwner() external {
-        address REQUESTOR = makeAddr("requestor");
+        address NOTOWNER = makeAddr("not owner");
         uint256 burnAmount = 1e9;   // 1 billion tokens
-        vm.prank(REQUESTOR);
+        vm.prank(NOTOWNER);
         vm.expectRevert();
         coin.burn(burnAmount);
     }
