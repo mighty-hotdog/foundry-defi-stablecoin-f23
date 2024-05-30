@@ -28,22 +28,25 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__PriceFeedAddressCannotBeZero();
     error DSCEngine__TokenAddressCannotBeZero();
     error DSCEngine__TransferFailed(address from,address to,address collateralTokenAddress,uint256 amount);
-    error DSCEngine__RequestedMintAmountBreachesMintLimit(address user,uint256 requestedMintAmount,uint256 maxSafeMintAmount);
+    error DSCEngine__RequestedMintAmountBreachesUserMintLimit(address user,uint256 requestedMintAmount,uint256 maxSafeMintAmount);
     error DSCEngine__DataFeedError(address tokenAddress, address priceFeedAddress, int answer);
     error DSCEngine__MintFailed(address toUser,uint256 amountMinted);
 
     /* State Variables */
-    uint256 public constant FRACTIONS_REMOVAL_ADJUSTER = 100;
-    address private immutable i_dscToken;
-    uint256 private immutable i_thresholdLimitPercent;  // NOTE: value only ranges between 1 and 99 inclusive
+    uint256 public constant FRACTION_REMOVAL_MULTIPLIER = 100;
+    address private immutable i_dscToken;   // contract address for the DSC token
+    uint256 private immutable i_thresholdLimitPercent;  // the single threshold limit to be applied to total value 
+                                                        //  of collateral deposits in the modifier withinMintLimitSimple()
+                                                        // NOTE: value is code-enforced to range between 1 and 99 inclusive
     // array of all allowed collateral tokens
     address[] private s_allowedCollateralTokens;
     // maps each allowed collateral token to its respective price feed
     mapping(address allowedTokenAddress => address tokenPriceFeed) private s_tokenToPriceFeed;
     // maps each existing user to collateral token, to the amount of deposit he currently holds in that token
     // Question: Is it better here to use a mapping or an array of structs?
-    mapping(address user => mapping(address collateralTokenAddress => uint256 amountOfCurrentDeposit)) private s_userToCollateralDepositHeld;
-    // maps each existing user to the amount of DSC he currently holds
+    mapping(address user => mapping(address collateralTokenAddress => uint256 amountOfCurrentDeposit)) 
+        private s_userToCollateralDepositHeld;
+    // maps each existing user to the amount of DSC he has minted and currently holds
     // Question: Is it better here to use a mapping or an array of structs?
     mapping(address user => uint256 dscAmountHeld) s_userToDSCMintHeld;
 
@@ -69,10 +72,10 @@ contract DSCEngine is ReentrancyGuard {
         _;
     }
 
-    modifier withinMintLimitSimple(address user, uint256 amountToMint) {
+    modifier withinMintLimitSimple(address user, uint256 requestedMintAmount) {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Approach 1 - simplified
-        //              apply a single threshold limit to compare total deposit value vs total mint value
+        //              apply a single threshold limit to total deposit value regardless of collateral
         //              factor = (total deposit value * threshold %) / total mint value
         //              user is within mint limits if factor > 1
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -82,22 +85,22 @@ contract DSCEngine is ReentrancyGuard {
         uint256 valueOfMintsHeld = getValueOfMintsHeldInUsd(user);
         // subject the 2 values to algo check //////////////////////////
         /* Algorithm Description
-         * i_thresholdLimitPercent is the threshold limit in percentage.
-         *  eg: if limit is 80%, then i_thresholdLimitPercent = 80
-         * FRACTIONS_REMOVAL_ADJUSTER is the multiplication factor needed to remove fractions.
-         *  eg: if i_thresholdLimitPercent = 80, then FRACTIONS_REMOVAL_ADJUSTER = 100
+         * i_thresholdLimitPercent is the single threshold limit in percentage.
+         *  eg: if threshold limit is 80%, then i_thresholdLimitPercent = 80
+         * FRACTION_REMOVAL_MULTIPLIER is the multiplication factor needed to remove fractions.
+         *  eg: if i_thresholdLimitPercent = 80, then FRACTION_REMOVAL_MULTIPLIER = 100
          *  because threshold value of deposits held = (valueOfDepositsHeld * i_thresholdLimitPercent) / 100
          *  but to remove fractions and deal solely in integers, need to multiply by 100.
          *  similiarly, the denominator valueOfMintsHeld also needs to be multiplied by 100.
          */
-        //uint256 factor = (valueOfDepositsHeld * i_thresholdLimitPercent) / ((valueOfMintsHeld + amountToMint) * FRACTIONS_REMOVAL_ADJUSTER);
+        //uint256 factor = (valueOfDepositsHeld * i_thresholdLimitPercent) / ((valueOfMintsHeld + requestedMintAmount) * FRACTION_REMOVAL_MULTIPLIER);
         uint256 numerator = valueOfDepositsHeld * i_thresholdLimitPercent;
-        uint256 denominator = (valueOfMintsHeld + amountToMint) * FRACTIONS_REMOVAL_ADJUSTER;
+        uint256 denominator = (valueOfMintsHeld + requestedMintAmount) * FRACTION_REMOVAL_MULTIPLIER;
         // revert if mint limit breached
         if (denominator > numerator) {
-            uint256 maxSafeMintAmount = (numerator - (valueOfMintsHeld * FRACTIONS_REMOVAL_ADJUSTER)) / FRACTIONS_REMOVAL_ADJUSTER;
+            uint256 maxSafeMintAmount = (numerator - (valueOfMintsHeld * FRACTION_REMOVAL_MULTIPLIER)) / FRACTION_REMOVAL_MULTIPLIER;
             // integer math may result in maxSafeMintAmount == 0, which is still logically correct
-            revert DSCEngine__RequestedMintAmountBreachesMintLimit(user,amountToMint,maxSafeMintAmount);
+            revert DSCEngine__RequestedMintAmountBreachesUserMintLimit(user,requestedMintAmount,maxSafeMintAmount);
         }
         _;
     }
@@ -105,7 +108,8 @@ contract DSCEngine is ReentrancyGuard {
     modifier withinMintLimitReal(address user, uint256 amountToMint) {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Approach 2 - realistic and more flexible
-        //              each allowed collateral is assigned its own threshold limit
+        //              each allowed collateral is assigned its own threshold limit, in consideration of the volatility 
+        //                  of its price and/or other market conditions.
         //              factor = sumOf(collateral Z total deposit value * collateral Z threshold %) / total mint value
         //              user is within mint limits if factor > 1
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -241,7 +245,18 @@ contract DSCEngine is ReentrancyGuard {
             revert DSCEngine__DataFeedError(token,priceFeed,answer);
         }
         // multiply amount by token price and return value in USD
-        return uint256(answer) * amount;
+        //return uint256(answer) * amount;
+        // Cyfrin Updraft says what Chainlink Data Feed returns is (price * decimal precision)
+        //  where decimal precision is given for each feed under Dec column in price feed page.
+        //  So according to Updraft, correct return value = (uint256(answer) * 1e10 * amount) / 1e18
+        //  Why? Dunno.
+        //  Ok so Updraft made it unnecessarily complicated.
+        //  Basically Chainlink Price Feed returns: int answer = (actual price in USD) * (1e8)
+        //  So to obtain value in USD for amountOfTokens:
+        //      (answer * amountOfTokens) / 1e8
+        //  Since this expression must yield an integer, it means that this value is rounded off to 
+        //  the nearest dollar, with the decimal values (ie: cents) being truncated off.
+        return (uint256(answer) * amount / 1e8);
     }
 
     function getValueOfDepositsHeldInUsd(address user) internal view returns (uint256 valueInUsd) {
