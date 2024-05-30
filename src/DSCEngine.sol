@@ -30,13 +30,18 @@ contract DSCEngine is ReentrancyGuard {
     /* State Variables */
     // record of all allowed collateral tokens, each mapped to their respective price feed
     mapping(address allowedTokenAddress => address tokenPriceFeed) private s_tokenToPriceFeed;
-    // record of all collateral deposits, maps the user/depositor, to the collateral token address, to the amount deposited
-    mapping(address user => mapping(address collateralTokenAddress => uint256 collateralAmountDeposited)) private s_userToCollateralDeposited;
+    // record of all collateral deposits held per user
+    // maps user, to the collateral token address, to the amount of deposit currently held
     // Question: Is it better here to use a mapping or an array of structs?
+    mapping(address user => mapping(address collateralTokenAddress => uint256 amountOfCurrentDeposit)) private s_userToCollateralDepositHeld;
+    // record of all DSC mints held per user
+    // maps user to the amount of DSC currently held
+    mapping(address user => uint256 dscAmountHeld) s_userToDSCMintHeld;
     address private immutable i_dscToken;
 
     /* Events */
     event CollateralDeposited(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
+    event DSCMinted(address indexed toUser,uint256 indexed amount);
 
     /* modifiers */
     modifier onlyAllowedTokens(address collateralAddress) {
@@ -53,6 +58,29 @@ contract DSCEngine is ReentrancyGuard {
         if (amount <= 0) {
             revert DSCEngine__InvalidAmount();
         }
+        _;
+    }
+
+    modifier withinMintLimit(address user, uint256 amountToMint) {
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Approach 1 - simplified
+        //              apply a single threshold limit to compare total deposit value vs total mint value
+        //              factor = (total deposit value * threshold %) / total mint value
+        //              user is within mint limits if factor > 1
+        // calc/obtain total value of user's deposits
+        //uint256 valueOfDeposits = getTotalValueOfDepositsInUsd(user);
+        // calc/obtain total value of user's mints so far
+        //uint256 valueOfMints = getTotalValueOfMintsInUsd(user);
+        // subject the 2 values to algo check
+        // revert if mint limit breached
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // Approach 2 - realistic and more flexible
+        //              each allowed collateral is assigned its own threshold limit
+        //              factor = sumOf(collateral Z total deposit value * collateral Z threshold %) / total mint value
+        //              user is within mint limits if factor > 1
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         _;
     }
 
@@ -85,6 +113,15 @@ contract DSCEngine is ReentrancyGuard {
 
     function depositCollateralMintDSC() external {}
 
+    /**
+     *  @dev    2 checks performed:
+     *              1. deposit is in allowed tokens
+     *              2. deposit amount is more than zero
+     *          if both checks passed, then proceed to:
+     *              1. record deposit (ie: change internal state)
+     *              2. emit event
+     *              3. perform the actual token transfer
+     */
     function depositCollateral(
         address collateralTokenAddress,
         uint256 collateralAmount
@@ -94,7 +131,7 @@ contract DSCEngine is ReentrancyGuard {
         nonReentrant 
         {
             // 1st update state and send emits
-            s_userToCollateralDeposited[msg.sender][collateralTokenAddress] += collateralAmount;
+            s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] += collateralAmount;
             emit CollateralDeposited(msg.sender,collateralTokenAddress,collateralAmount);
 
             // then perform actual action to effect the state change
@@ -123,7 +160,28 @@ contract DSCEngine is ReentrancyGuard {
 
     function redeemCollateral() external {}
 
-    function mintDSC() external {}
+    /**
+     *  @dev    checks performed:
+     *              1. mint amount is more than zero
+     *              2. msg.sender's mint limit has not been breached
+     *          if both checks passed, then proceed:
+     *              1. record mint (ie: change internal state)
+     *              2. emit event
+     *              3. perform actual token transfer
+     */
+    function mintDSC(uint256 amount) external moreThanZero(amount) withinMintLimit(msg.sender,amount) {
+        // 1st update state and send emits
+        s_userToDSCMintHeld[msg.sender] += amount;
+        emit DSCMinted(msg.sender,amount);
+
+        // then perform actual action to effect the state change
+        /*
+        bool success = actualMintFunction(toSenderAddress,amount);
+        if (!success) {
+            revert MintFailed(toSenderAddress,amount);
+        }
+        */
+    }
 
     function burnDSC() external {}
 
