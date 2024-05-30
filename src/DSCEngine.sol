@@ -6,6 +6,7 @@ import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/v0.8/interfaces/AggregatorV3Interface.sol";
 
 /**
  *  @title  DSCEngine
@@ -27,21 +28,24 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__PriceFeedAddressCannotBeZero();
     error DSCEngine__TokenAddressCannotBeZero();
     error DSCEngine__TransferFailed(address from,address to,address collateralTokenAddress,uint256 amount);
-    error DSCEngine__MintLimitBreached(address user,uint256 amountToMint);
+    error DSCEngine__RequestedMintAmountBreachesMintLimit(address user,uint256 requestedMintAmount,uint256 maxSafeMintAmount);
+    error DSCEngine__DataFeedError(address tokenAddress, address priceFeedAddress, int answer);
+    error DSCEngine__MintFailed(address toUser,uint256 amountMinted);
 
     /* State Variables */
     uint256 public constant FRACTIONS_REMOVAL_ADJUSTER = 100;
-    // record of all allowed collateral tokens, each mapped to their respective price feed
-    mapping(address allowedTokenAddress => address tokenPriceFeed) private s_tokenToPriceFeed;
-    // record of all collateral deposits held per user
-    // maps user, to the collateral token address, to the amount of deposit currently held
-    // Question: Is it better here to use a mapping or an array of structs?
-    mapping(address user => mapping(address collateralTokenAddress => uint256 amountOfCurrentDeposit)) private s_userToCollateralDepositHeld;
-    // record of all DSC mints held per user
-    // maps user to the amount of DSC currently held
-    mapping(address user => uint256 dscAmountHeld) s_userToDSCMintHeld;
     address private immutable i_dscToken;
     uint256 private immutable i_thresholdLimitPercent;  // NOTE: value only ranges between 1 and 99 inclusive
+    // array of all allowed collateral tokens
+    address[] private s_allowedCollateralTokens;
+    // maps each allowed collateral token to its respective price feed
+    mapping(address allowedTokenAddress => address tokenPriceFeed) private s_tokenToPriceFeed;
+    // maps each existing user to collateral token, to the amount of deposit he currently holds in that token
+    // Question: Is it better here to use a mapping or an array of structs?
+    mapping(address user => mapping(address collateralTokenAddress => uint256 amountOfCurrentDeposit)) private s_userToCollateralDepositHeld;
+    // maps each existing user to the amount of DSC he currently holds
+    // Question: Is it better here to use a mapping or an array of structs?
+    mapping(address user => uint256 dscAmountHeld) s_userToDSCMintHeld;
 
     /* Events */
     event CollateralDeposited(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
@@ -86,12 +90,14 @@ contract DSCEngine is ReentrancyGuard {
          *  but to remove fractions and deal solely in integers, need to multiply by 100.
          *  similiarly, the denominator valueOfMintsHeld also needs to be multiplied by 100.
          */
-        //uint256 factor = (valueOfDepositsHeld * i_thresholdLimitPercent) / (valueOfMintsHeld * FRACTIONS_REMOVAL_ADJUSTER);
+        //uint256 factor = (valueOfDepositsHeld * i_thresholdLimitPercent) / ((valueOfMintsHeld + amountToMint) * FRACTIONS_REMOVAL_ADJUSTER);
         uint256 numerator = valueOfDepositsHeld * i_thresholdLimitPercent;
         uint256 denominator = (valueOfMintsHeld + amountToMint) * FRACTIONS_REMOVAL_ADJUSTER;
         // revert if mint limit breached
         if (denominator > numerator) {
-            revert DSCEngine__MintLimitBreached(user,amountToMint);
+            uint256 maxSafeMintAmount = (numerator - (valueOfMintsHeld * FRACTIONS_REMOVAL_ADJUSTER)) / FRACTIONS_REMOVAL_ADJUSTER;
+            // integer math may result in maxSafeMintAmount == 0, which is still logically correct
+            revert DSCEngine__RequestedMintAmountBreachesMintLimit(user,amountToMint,maxSafeMintAmount);
         }
         _;
     }
@@ -133,6 +139,7 @@ contract DSCEngine is ReentrancyGuard {
                 revert DSCEngine__PriceFeedAddressCannotBeZero();
             }
             s_tokenToPriceFeed[allowedCollateralTokenAddresses[i]] = collateralTokenPriceFeedAddresses[i];
+            s_allowedCollateralTokens.push(allowedCollateralTokenAddresses[i]);
         }
         i_dscToken = dscToken;
         i_thresholdLimitPercent = thresholdPercent;
@@ -205,12 +212,10 @@ contract DSCEngine is ReentrancyGuard {
         emit DSCMinted(msg.sender,amount);
 
         // then perform actual action to effect the state change
-        /*
-        bool success = actualMintFunction(toSenderAddress,amount);
+        bool success = DecentralizedStableCoin(i_dscToken).mint(msg.sender, amount);
         if (!success) {
-            revert MintFailed(toSenderAddress,amount);
+            revert DSCEngine__MintFailed(msg.sender,amount);
         }
-        */
     }
 
     function burnDSC() external {}
@@ -231,11 +236,29 @@ contract DSCEngine is ReentrancyGuard {
         // obtain price feed address
         address priceFeed = s_tokenToPriceFeed[token];
         // obtain token price from price feed
-        // multiply amount by token price to obtain value in USD
-        // return the value in USD
+        (,int answer,,,) = AggregatorV3Interface(priceFeed).latestRoundData();
+        if (answer <= 0) {
+            revert DSCEngine__DataFeedError(token,priceFeed,answer);
+        }
+        // multiply amount by token price and return value in USD
+        return uint256(answer) * amount;
     }
 
-    function getValueOfDepositsHeldInUsd(address user) internal view returns (uint256 valueInUsd) {}
+    function getValueOfDepositsHeldInUsd(address user) internal view returns (uint256 valueInUsd) {
+        // loop through all allowed collateral tokens
+        for(uint256 i=0;i<s_allowedCollateralTokens.length;i++) {
+            // obtain deposit amount held by user in each collateral token
+            uint256 depositHeld = s_userToCollateralDepositHeld[user][s_allowedCollateralTokens[i]];
+            if (depositHeld > 0) {
+                // convert to USD value and add to return value
+                valueInUsd += convertToValueInUsd(s_allowedCollateralTokens[i],depositHeld);
+            }
+        }
+        //return valueInUsd;    // redundant
+    }
 
-    function getValueOfMintsHeldInUsd(address user) internal view returns (uint256 valueInUsd) {}
+    function getValueOfMintsHeldInUsd(address user) internal view returns (uint256 valueInUsd) {
+        // since DSC token is USD pegged 1:1, no extra logic needed to convert DSC token to USD value
+        return s_userToDSCMintHeld[user];
+    }
 }
