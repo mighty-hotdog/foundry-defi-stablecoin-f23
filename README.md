@@ -21,3 +21,10 @@ decisions about the system's future being made collectively by its members. Regu
 audits and proof-of-reserve transactions further enhance trust in the system by 
 verifying that the Bitcoin backing wBTC exists and is secure" 
  - excerpt from https://www.gemini.com/cryptopedia/wbtc-what-is-wrapped-bitcoin
+
+TODOs
+1. write unit tests for MockAggregatorV3
+2. write integration tests for DeployDSCEngine
+3. write unit/integration tests for DSCEngine
+4. complete implementation for DSCEngine
+5. complete tests for DSCEngine
