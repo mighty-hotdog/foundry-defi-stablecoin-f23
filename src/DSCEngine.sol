@@ -13,21 +13,24 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *  @dev    This contract is the Owner of the DecentralizedStableCoin contract.
  *          Stablecoin characteristics to be implemented and enforced by this contract:
  *              Collateral: Exogenous (specifically wETH & wBTC)
- *              Relative Stability: Anchored (ie: pegged to USD)
+ *              Relative Stability: Anchored (ie: pegged to USD 1:1)
  *              Stability Mechanism: Decentralized Algorithmic
  *          Makes use of Chainlink Price Feeds.
  */
 contract DSCEngine is ReentrancyGuard {
     /* Errors */
     error DSCEngine__TokenNotAllowed(address tokenAddress);
+    error DSCEngine__ThresholdOutOfRange(uint256 threshold);
     error DSCEngine__InvalidAmount();
     error DSCEngine__ConstructorInputParamsMismatch(uint256 lengthOfCollateralAddressesArray,uint256 lengthOfPriceFeedsArray);
     error DSCEngine__CollateralTokenAddressCannotBeZero();
     error DSCEngine__PriceFeedAddressCannotBeZero();
     error DSCEngine__TokenAddressCannotBeZero();
     error DSCEngine__TransferFailed(address from,address to,address collateralTokenAddress,uint256 amount);
+    error DSCEngine__MintLimitBreached(address user,uint256 amountToMint);
 
     /* State Variables */
+    uint256 public constant FRACTIONS_REMOVAL_ADJUSTER = 100;
     // record of all allowed collateral tokens, each mapped to their respective price feed
     mapping(address allowedTokenAddress => address tokenPriceFeed) private s_tokenToPriceFeed;
     // record of all collateral deposits held per user
@@ -38,6 +41,7 @@ contract DSCEngine is ReentrancyGuard {
     // maps user to the amount of DSC currently held
     mapping(address user => uint256 dscAmountHeld) s_userToDSCMintHeld;
     address private immutable i_dscToken;
+    uint256 private immutable i_thresholdLimitPercent;  // NOTE: value only ranges between 1 and 99 inclusive
 
     /* Events */
     event CollateralDeposited(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
@@ -61,20 +65,38 @@ contract DSCEngine is ReentrancyGuard {
         _;
     }
 
-    modifier withinMintLimit(address user, uint256 amountToMint) {
+    modifier withinMintLimitSimple(address user, uint256 amountToMint) {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Approach 1 - simplified
         //              apply a single threshold limit to compare total deposit value vs total mint value
         //              factor = (total deposit value * threshold %) / total mint value
         //              user is within mint limits if factor > 1
-        // calc/obtain total value of user's deposits
-        //uint256 valueOfDeposits = getTotalValueOfDepositsInUsd(user);
-        // calc/obtain total value of user's mints so far
-        //uint256 valueOfMints = getTotalValueOfMintsInUsd(user);
-        // subject the 2 values to algo check
-        // revert if mint limit breached
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        // calc/obtain total value of user's deposits //////////////////
+        uint256 valueOfDepositsHeld = getValueOfDepositsHeldInUsd(user);
+        // calc/obtain total value of user's mints so far //////////////
+        uint256 valueOfMintsHeld = getValueOfMintsHeldInUsd(user);
+        // subject the 2 values to algo check //////////////////////////
+        /* Algorithm Description
+         * i_thresholdLimitPercent is the threshold limit in percentage.
+         *  eg: if limit is 80%, then i_thresholdLimitPercent = 80
+         * FRACTIONS_REMOVAL_ADJUSTER is the multiplication factor needed to remove fractions.
+         *  eg: if i_thresholdLimitPercent = 80, then FRACTIONS_REMOVAL_ADJUSTER = 100
+         *  because threshold value of deposits held = (valueOfDepositsHeld * i_thresholdLimitPercent) / 100
+         *  but to remove fractions and deal solely in integers, need to multiply by 100.
+         *  similiarly, the denominator valueOfMintsHeld also needs to be multiplied by 100.
+         */
+        //uint256 factor = (valueOfDepositsHeld * i_thresholdLimitPercent) / (valueOfMintsHeld * FRACTIONS_REMOVAL_ADJUSTER);
+        uint256 numerator = valueOfDepositsHeld * i_thresholdLimitPercent;
+        uint256 denominator = (valueOfMintsHeld + amountToMint) * FRACTIONS_REMOVAL_ADJUSTER;
+        // revert if mint limit breached
+        if (denominator > numerator) {
+            revert DSCEngine__MintLimitBreached(user,amountToMint);
+        }
+        _;
+    }
 
+    modifier withinMintLimitReal(address user, uint256 amountToMint) {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Approach 2 - realistic and more flexible
         //              each allowed collateral is assigned its own threshold limit
@@ -88,11 +110,15 @@ contract DSCEngine is ReentrancyGuard {
     constructor(
         address[] memory allowedCollateralTokenAddresses, 
         address[] memory collateralTokenPriceFeedAddresses, 
-        address dscToken
+        address dscToken,
+        uint256 thresholdPercent
         ) 
     {
         if (dscToken == address(0)) {
             revert DSCEngine__TokenAddressCannotBeZero();
+        }
+        if ((thresholdPercent < 1) || (thresholdPercent > 99)) {
+            revert DSCEngine__ThresholdOutOfRange(thresholdPercent);
         }
         if (allowedCollateralTokenAddresses.length != collateralTokenPriceFeedAddresses.length) {
             revert DSCEngine__ConstructorInputParamsMismatch(
@@ -109,11 +135,15 @@ contract DSCEngine is ReentrancyGuard {
             s_tokenToPriceFeed[allowedCollateralTokenAddresses[i]] = collateralTokenPriceFeedAddresses[i];
         }
         i_dscToken = dscToken;
+        i_thresholdLimitPercent = thresholdPercent;
     }
 
     function depositCollateralMintDSC() external {}
 
     /**
+     *  @notice depositCollateral()
+     *  @param  collateralTokenAddress  collateral token contract address
+     *  @param  collateralAmount    amount of collateral to deposit
      *  @dev    2 checks performed:
      *              1. deposit is in allowed tokens
      *              2. deposit amount is more than zero
@@ -167,9 +197,9 @@ contract DSCEngine is ReentrancyGuard {
      *          if both checks passed, then proceed:
      *              1. record mint (ie: change internal state)
      *              2. emit event
-     *              3. perform actual token transfer
+     *              3. perform actual mint/token transfer
      */
-    function mintDSC(uint256 amount) external moreThanZero(amount) withinMintLimit(msg.sender,amount) {
+    function mintDSC(uint256 amount) external moreThanZero(amount) withinMintLimitSimple(msg.sender,amount) {
         // 1st update state and send emits
         s_userToDSCMintHeld[msg.sender] += amount;
         emit DSCMinted(msg.sender,amount);
@@ -189,4 +219,23 @@ contract DSCEngine is ReentrancyGuard {
 
     function getHealthStatus() external {}
 
+    function convertToValueInUsd(
+        address token, 
+        uint256 amount) 
+        internal view onlyAllowedTokens(token) 
+        returns (uint256 valueInUsd)
+    {
+        if (amount == 0) {
+            return 0;
+        }
+        // obtain price feed address
+        address priceFeed = s_tokenToPriceFeed[token];
+        // obtain token price from price feed
+        // multiply amount by token price to obtain value in USD
+        // return the value in USD
+    }
+
+    function getValueOfDepositsHeldInUsd(address user) internal view returns (uint256 valueInUsd) {}
+
+    function getValueOfMintsHeldInUsd(address user) internal view returns (uint256 valueInUsd) {}
 }
