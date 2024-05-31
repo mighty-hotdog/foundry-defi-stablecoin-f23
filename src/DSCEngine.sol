@@ -31,9 +31,10 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__RequestedMintAmountBreachesUserMintLimit(address user,uint256 requestedMintAmount,uint256 maxSafeMintAmount);
     error DSCEngine__DataFeedError(address tokenAddress, address priceFeedAddress, int answer);
     error DSCEngine__MintFailed(address toUser,uint256 amountMinted);
+    error DSCEngine__OutOfArrayRange(uint256 maxIndex,uint256 requestedIndex);
 
     /* State Variables */
-    uint256 public constant FRACTION_REMOVAL_MULTIPLIER = 100;
+    uint256 private constant FRACTION_REMOVAL_MULTIPLIER = 100;
     address private immutable i_dscToken;   // contract address for the DSC token
     uint256 private immutable i_thresholdLimitPercent;  // the single threshold limit to be applied to total value 
                                                         //  of collateral deposits in the modifier withinMintLimitSimple()
@@ -275,5 +276,31 @@ contract DSCEngine is ReentrancyGuard {
     function getValueOfMintsHeldInUsd(address user) internal view returns (uint256 valueInUsd) {
         // since DSC token is USD pegged 1:1, no extra logic needed to convert DSC token to USD value
         return s_userToDSCMintHeld[user];
+    }
+
+    /* Getter Functions */
+    function getFractionRemovalMultiplier() external pure returns (uint256) {
+        return FRACTION_REMOVAL_MULTIPLIER;
+    }
+    function getDscTokenAddress() external view returns (address) {
+        return i_dscToken;
+    }
+    function getThresholdLimitPercent() external view returns (uint256) {
+        return i_thresholdLimitPercent;
+    }
+    function getAllowedCollateralTokensArray() external view returns (uint256 arrayLength,address[] memory allowedTokensArray) {
+        return (s_allowedCollateralTokens.length,s_allowedCollateralTokens);
+    }
+    function getAllowedCollateralTokens(uint256 index) external view returns (address) {
+        if (index >= s_allowedCollateralTokens.length) {
+            revert DSCEngine__OutOfArrayRange(s_allowedCollateralTokens.length-1,index);
+        }
+        return s_allowedCollateralTokens[index];
+    }
+    function getPriceFeed(address token) external view returns (address) {
+        if (token == address(0)) {
+            revert DSCEngine__CollateralTokenAddressCannotBeZero();
+        }
+        return s_tokenToPriceFeed[token];
     }
 }

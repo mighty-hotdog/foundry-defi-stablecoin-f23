@@ -19,15 +19,17 @@ contract MockAggregatorV3 is Script {
   }
 
   function decimals() external view returns (uint8) {
-    return uint8(vm.envUint("CHAINLINK_DATAFEED_PRECISION_ETH_USD"));
+    return uint8(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_ETH_USD"));
   }
 
-  function description() external pure returns (string memory) {
-    return "MockAggregatorV3";
+  function description() external view returns (string memory) {
+    //return "MockAggregatorV3";
+    return vm.envString("CHAINLINK_MOCK_PRICE_FEED_DESCRIPTION");
   }
 
-  function version() external pure returns (uint256) {
-    return 3;
+  function version() external view returns (uint256) {
+    //return 3;
+    return vm.envUint("CHAINLINK_MOCK_PRICE_FEED_VERSION");
   }
 
   function getRoundData(

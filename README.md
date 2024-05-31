@@ -23,8 +23,8 @@ verifying that the Bitcoin backing wBTC exists and is secure"
  - excerpt from https://www.gemini.com/cryptopedia/wbtc-what-is-wrapped-bitcoin
 
 TODOs
-1. write unit tests for MockAggregatorV3
-2. write integration tests for DeployDSCEngine
+1. ~write unit tests for MockAggregatorV3~  DONE
+2. ~write integration tests for DeployDSCEngine~  DONE (but only tested on Anvil)
 3. write unit/integration tests for DSCEngine
 4. complete implementation for DSCEngine
 5. complete tests for DSCEngine
