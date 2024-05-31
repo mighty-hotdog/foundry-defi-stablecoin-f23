@@ -51,6 +51,7 @@ contract DeployDSCEngineTest is Test {
 
     //  2. deploy in SEPOLIA
     function testDeployInSepoliaWithCorrectAllowedCollateralTokensAndPriceFeeds() external view onlySepolia {
+        console.log("Passed onlySepolia");
         (uint256 arrayLength,address[] memory allowedTokensArray) = engine.getAllowedCollateralTokensArray();
         if (arrayLength != 2) {
             revert DeployDSCEngineTest__IncorrectAllowedCollateralTokensArrayLength(arrayLength);
@@ -70,6 +71,7 @@ contract DeployDSCEngineTest is Test {
     }
     //  3. deploy in MAINNET
     function testDeployInMainnetWithCorrectAllowedCollateralTokensAndPriceFeeds() external view onlyMainnet {
+        console.log("Passed onlyMainnet");
         (uint256 arrayLength,address[] memory allowedTokensArray) = engine.getAllowedCollateralTokensArray();
         if (arrayLength != 2) {
             revert DeployDSCEngineTest__IncorrectAllowedCollateralTokensArrayLength(arrayLength);
@@ -89,6 +91,7 @@ contract DeployDSCEngineTest is Test {
     }
     //  4. deploy in Anvil
     function testDeployInAnvilWithCorrectAllowedCollateralTokensAndPriceFeeds() external view onlyAnvil {
+        console.log("Passed onlyAnvil");
         (uint256 arrayLength,address[] memory allowedTokensArray) = engine.getAllowedCollateralTokensArray();
         if (arrayLength != 2) {
             revert DeployDSCEngineTest__IncorrectAllowedCollateralTokensArrayLength(arrayLength);
