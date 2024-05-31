@@ -12,11 +12,12 @@ import {Script} from "forge-std/Script.sol";
  *          getRoundData() and latestRoundData() will always return the same values no matter the roundId
  */
 contract MockAggregatorV3 is Script {
-  string private s_envLabelToRead;
+  string public s_envLabelToRead;
 
   constructor(string memory envLabelToRead) {
     s_envLabelToRead = envLabelToRead;
   }
+
   function decimals() external view returns (uint8) {
     return uint8(vm.envUint("CHAINLINK_DATAFEED_PRECISION_ETH_USD"));
   }
