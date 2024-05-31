@@ -10,9 +10,9 @@ contract DecentralizedStableCoinTest is Test {
     /////////////////////////////////////////////////////////////////////////////////
     // All errors reverted by DecentralizedStableCoin contract and to be tested for
     /////////////////////////////////////////////////////////////////////////////////
-    error DecentralizedStableCoin__AmountMustBeMoreThanZero();
-    error DecentralizedStableCoin__BurnAmountExceedsBalance();
-    error DecentralizedStableCoin__InvalidAddress();
+    //error DecentralizedStableCoin__AmountMustBeMoreThanZero();
+    //error DecentralizedStableCoin__BurnAmountExceedsBalance();
+    //error DecentralizedStableCoin__InvalidAddress();
     /////////////////////////////////////////////////////////////////////////////////
 
     /////////////////////////////////////////////////////////////////////////////////

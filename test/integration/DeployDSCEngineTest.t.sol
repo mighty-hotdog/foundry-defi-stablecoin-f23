@@ -42,7 +42,7 @@ contract DeployDSCEngineTest is Test {
     function testValidDscToken() external view {
         assert(engine.getDscTokenAddress() == address(coin));
     }
-    function testThresholdPercentOutOfRange() external view {
+    function testThresholdPercentWithinRange() external view {
         assert((engine.getThresholdLimitPercent() >= 1) && (engine.getThresholdLimitPercent() <= 99));
     }
     function testValidThresholdPercent() external view {

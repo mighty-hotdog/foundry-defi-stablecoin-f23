@@ -22,11 +22,11 @@ contract DSCEngine is ReentrancyGuard {
     /* Errors */
     error DSCEngine__TokenNotAllowed(address tokenAddress);
     error DSCEngine__ThresholdOutOfRange(uint256 threshold);
-    error DSCEngine__InvalidAmount();
+    error DSCEngine__AmountCannotBeZero();
     error DSCEngine__ConstructorInputParamsMismatch(uint256 lengthOfCollateralAddressesArray,uint256 lengthOfPriceFeedsArray);
     error DSCEngine__CollateralTokenAddressCannotBeZero();
     error DSCEngine__PriceFeedAddressCannotBeZero();
-    error DSCEngine__TokenAddressCannotBeZero();
+    error DSCEngine__DscTokenAddressCannotBeZero();
     error DSCEngine__TransferFailed(address from,address to,address collateralTokenAddress,uint256 amount);
     error DSCEngine__RequestedMintAmountBreachesUserMintLimit(address user,uint256 requestedMintAmount,uint256 maxSafeMintAmount);
     error DSCEngine__DataFeedError(address tokenAddress, address priceFeedAddress, int answer);
@@ -58,7 +58,7 @@ contract DSCEngine is ReentrancyGuard {
     /* modifiers */
     modifier onlyAllowedTokens(address collateralAddress) {
         if (collateralAddress == address(0)) {
-            revert DSCEngine__TokenAddressCannotBeZero();
+            revert DSCEngine__CollateralTokenAddressCannotBeZero();
         }
         if (s_tokenToPriceFeed[collateralAddress] == address(0)) {
             revert DSCEngine__TokenNotAllowed(collateralAddress);
@@ -68,7 +68,7 @@ contract DSCEngine is ReentrancyGuard {
 
     modifier moreThanZero(uint256 amount) {
         if (amount <= 0) {
-            revert DSCEngine__InvalidAmount();
+            revert DSCEngine__AmountCannotBeZero();
         }
         _;
     }
@@ -126,7 +126,7 @@ contract DSCEngine is ReentrancyGuard {
         ) 
     {
         if (dscToken == address(0)) {
-            revert DSCEngine__TokenAddressCannotBeZero();
+            revert DSCEngine__DscTokenAddressCannotBeZero();
         }
         if ((thresholdPercent < 1) || (thresholdPercent > 99)) {
             revert DSCEngine__ThresholdOutOfRange(thresholdPercent);
@@ -203,6 +203,8 @@ contract DSCEngine is ReentrancyGuard {
     function redeemCollateral() external {}
 
     /**
+     *  @notice mintDSC()
+     *  @param  amount  amount of DSC token to be requested for mint
      *  @dev    checks performed:
      *              1. mint amount is more than zero
      *              2. msg.sender's mint limit has not been breached
