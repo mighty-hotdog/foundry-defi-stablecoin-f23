@@ -151,8 +151,8 @@ contract DSCEngineTest is Test {
         // this test just checks that given the inputs depositCollateral() runs with no reverts
 
         // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
-        //  contracts on the Sepolia or Mainnet, hence this call doesn't work and we have no way
-        //  to mint the user some WETH/WBTC for the deposit call.
+        //  contracts on the Sepolia or Mainnet, hence this call doesn't work on those chains 
+        //  and we have no way to mint the user some WETH/WBTC for the deposit call.
         //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
         //  mint(). Skip this test on any other chain.
         randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
@@ -184,8 +184,8 @@ contract DSCEngineTest is Test {
         //  3. engine balance is correct
 
         // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
-        //  contracts on the Sepolia or Mainnet, hence this call doesn't work and we have no way
-        //  to mint the user some WETH/WBTC for the deposit call.
+        //  contracts on the Sepolia or Mainnet, hence this call doesn't work on those chains 
+        //  and we have no way to mint the user some WETH/WBTC for the deposit call.
         //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
         //  mint(). Skip this test on any other chain.
         randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
@@ -213,8 +213,8 @@ contract DSCEngineTest is Test {
     }
     function testEmitCollateralDeposited(uint256 randomDepositAmount) external skipIfNotOnAnvil {
         // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
-        //  contracts on the Sepolia or Mainnet, hence this call doesn't work and we have no way
-        //  to mint the user some WETH/WBTC for the deposit call.
+        //  contracts on the Sepolia or Mainnet, hence this call doesn't work on those chains 
+        //  and we have no way to mint the user some WETH/WBTC for the deposit call.
         //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
         //  mint(). Skip this test on any other chain.
         randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
