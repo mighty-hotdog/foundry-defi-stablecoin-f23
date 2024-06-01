@@ -56,7 +56,7 @@ contract DSCEngine is ReentrancyGuard {
     event CollateralDeposited(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
     event DSCMinted(address indexed toUser,uint256 indexed amount);
 
-    /* modifiers */
+    /* Modifiers */
     modifier onlyAllowedTokens(address collateralAddress) {
         if (collateralAddress == address(0)) {
             revert DSCEngine__CollateralTokenAddressCannotBeZero();
@@ -174,16 +174,17 @@ contract DSCEngine is ReentrancyGuard {
         nonReentrant 
         {
             //console.log("msg.sender: ",msg.sender);
-            // 1st update state and send emits
+            // 1st update state and send emits,
             s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] += collateralAmount;
             emit CollateralDeposited(msg.sender,collateralTokenAddress,collateralAmount);
 
-            // then perform actual action to effect the state change
-            // basically the external user who called depositCollateral(), is performing the collateral transfer 
-            //  here by calling transferFrom(), to transfer the amount from his own balance to the engine which is 
-            //  address(this).
-            // Question: Is approve needed when a user is transferring from his own balance?
-            // Answer: No. It is not needed.
+            // then perform actual action to effect the state change.
+            
+            // Basically the external user who called depositCollateral() is msg.sender.
+            // From within depositCollateral(), the DSCEngine calls transferFrom() to make the actual transfer
+            //  of tokens. This means DSCEngine is the "spender" that the user needs to approve 1st with an
+            //  appropriate allowance of the token to be transferred.
+            // In this case, the "to address" to transfer the tokens to is the DSCEngine itself.
             bool success = IERC20(collateralTokenAddress).transferFrom(msg.sender,address(this),collateralAmount);
             if (!success) {
                 // Question: Will this revert also rollback the earlier statements in this function call?
@@ -311,5 +312,20 @@ contract DSCEngine is ReentrancyGuard {
     }
     function getDepositHeld(address user,address token) external view onlyAllowedTokens(token) returns (uint256) {
         return s_userToCollateralDepositHeld[user][token];
+    }
+
+    /**
+     *  Test Scaffolding
+     *  These wrapper functions expose internal functions for the purpose of testing them.
+     *  This whole section should be commented out and/or removed when testing is completed.
+     */
+    function exposeconvertToValueInUsd(address token,uint256 amount) public view returns (uint256) {
+        return convertToValueInUsd(token,amount);
+    }
+    function exposegetValueOfDepositsHeldInUsd(address user) public view returns (uint256) {
+        return getValueOfDepositsHeldInUsd(user);
+    }
+    function exposegetValueOfMintsHeldInUsd(address user) public view returns (uint256) {
+        return getValueOfMintsHeldInUsd(user);
     }
 }

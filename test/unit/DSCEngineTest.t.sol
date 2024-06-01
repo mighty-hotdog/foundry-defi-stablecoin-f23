@@ -237,4 +237,81 @@ contract DSCEngineTest is Test {
     ////////////////////////////////////////////////////////////////////
     // Unit tests for mintDSC()
     ////////////////////////////////////////////////////////////////////
+    function testMintZeroAmount() external {
+        vm.expectRevert(DSCEngine.DSCEngine__AmountCannotBeZero.selector);
+        engine.mintDSC(0);
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for convertToValueInUsd()
+    ////////////////////////////////////////////////////////////////////
+    function testConvertWETH(uint256 randomAmount) external view {
+        randomAmount = bound(randomAmount,0,100);
+        (address weth,,,) = config.s_activeChainConfig();
+        console.log(randomAmount," wETH is ",engine.exposeconvertToValueInUsd(weth,randomAmount),"USD");
+    }
+    function testConvertWBTC(uint256 randomAmount) external view {
+        randomAmount = bound(randomAmount,0,100);
+        (,address wbtc,,) = config.s_activeChainConfig();
+        console.log(randomAmount," wBTC is ",engine.exposeconvertToValueInUsd(wbtc,randomAmount),"USD");
+    }
+    function testConvertWETHOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
+        // This test performs an assertEq() comparing function return vs mock datafeed answer in the .env,
+        //  hence it can only pass when referencing mock data feeds deployed in Anvil. Therefore skip if
+        //  on any chain other than Anvil.
+        randomAmount = bound(randomAmount,0,100);
+        (address weth,,,) = config.s_activeChainConfig();
+        uint256 returnValue = engine.exposeconvertToValueInUsd(weth,randomAmount);
+        console.log(randomAmount," wETH is ",returnValue,"USD");
+        assertEq(returnValue,vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD")*randomAmount/1e8);
+    }
+    function testConvertWBTCOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
+        // This test performs an assertEq() comparing function return vs mock datafeed answer in the .env,
+        //  hence it can only pass when referencing mock data feeds deployed in Anvil. Therefore skip if
+        //  on any chain other than Anvil.
+        randomAmount = bound(randomAmount,0,100);
+        (,address wbtc,,) = config.s_activeChainConfig();
+        uint256 returnValue = engine.exposeconvertToValueInUsd(wbtc,randomAmount);
+        console.log(randomAmount," wBTC is ",returnValue,"USD");
+        assertEq(returnValue,vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD")*randomAmount/1e8);
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getValueOfDepositsHeldInUsd()
+    ////////////////////////////////////////////////////////////////////
+    function testValueOfDepositsIsCorrect(uint256 randomDepositAmount) external skipIfNotOnAnvil {
+        // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
+        //  contracts on the Sepolia or Mainnet, hence this call doesn't work on those chains 
+        //  and we have no way to mint the user some WETH/WBTC for the deposit call.
+        //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
+        //  mint(). Skip this test on any other chain.
+        randomDepositAmount = bound(randomDepositAmount,1,100);
+        (uint256 arraySize,address[] memory arrayTokens) = engine.getAllowedCollateralTokensArray();
+        for(uint256 i=0;i<arraySize;i++) {
+            // preparations needed:
+            //  1. mint USER enough collateral tokens for the deposit
+            ERC20Mock(arrayTokens[i]).mint(USER,randomDepositAmount);
+            //  2. USER to approve engine as spender with enough allowance for deposit
+            vm.prank(USER);
+            ERC20Mock(arrayTokens[i]).approve(address(engine),randomDepositAmount);
+            //  3. perform the actual deposit call as USER
+            vm.prank(USER);
+            engine.depositCollateral(arrayTokens[i], randomDepositAmount);
+            console.log("Deposit #",i+1,": ",randomDepositAmount);
+        }
+        uint256 returnValue = engine.exposegetValueOfDepositsHeldInUsd(USER);
+        console.log("Value of Deposits: ",returnValue,"USD");
+        assertEq(
+            returnValue,
+            (
+                (vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD")*randomDepositAmount/1e8) + 
+                (vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD")*randomDepositAmount/1e8)
+            )
+        );
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getValueOfMintsHeldInUsd()
+    ////////////////////////////////////////////////////////////////////
+    function testValueOfMintsIsCorrect() external {}
 }
