@@ -4,9 +4,10 @@ pragma solidity ^0.8.18;
 
 import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+//import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/v0.8/interfaces/AggregatorV3Interface.sol";
+//import {console} from "forge-std/Test.sol";
 
 /**
  *  @title  DSCEngine
@@ -172,11 +173,17 @@ contract DSCEngine is ReentrancyGuard {
         moreThanZero(collateralAmount) 
         nonReentrant 
         {
+            //console.log("msg.sender: ",msg.sender);
             // 1st update state and send emits
             s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] += collateralAmount;
             emit CollateralDeposited(msg.sender,collateralTokenAddress,collateralAmount);
 
             // then perform actual action to effect the state change
+            // basically the external user who called depositCollateral(), is performing the collateral transfer 
+            //  here by calling transferFrom(), to transfer the amount from his own balance to the engine which is 
+            //  address(this).
+            // Question: Is approve needed when a user is transferring from his own balance?
+            // Answer: No. It is not needed.
             bool success = IERC20(collateralTokenAddress).transferFrom(msg.sender,address(this),collateralAmount);
             if (!success) {
                 // Question: Will this revert also rollback the earlier statements in this function call?
@@ -299,10 +306,10 @@ contract DSCEngine is ReentrancyGuard {
         }
         return s_allowedCollateralTokens[index];
     }
-    function getPriceFeed(address token) external view returns (address) {
-        if (token == address(0)) {
-            revert DSCEngine__CollateralTokenAddressCannotBeZero();
-        }
+    function getPriceFeed(address token) external view onlyAllowedTokens(token) returns (address) {
         return s_tokenToPriceFeed[token];
+    }
+    function getDepositHeld(address user,address token) external view onlyAllowedTokens(token) returns (uint256) {
+        return s_userToCollateralDepositHeld[user][token];
     }
 }

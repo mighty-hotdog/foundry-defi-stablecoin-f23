@@ -67,7 +67,7 @@ contract DecentralizedStableCoinTest is Test {
     function testMintToZeroAddress() external {
         uint256 mintAmount = 1e5;   // 100,000 tokens
         vm.prank(coin.owner());
-        vm.expectRevert(DecentralizedStableCoin.DecentralizedStableCoin__InvalidAddress.selector);
+        vm.expectRevert(DecentralizedStableCoin.DecentralizedStableCoin__ReceiverAddressCannotBeZero.selector);
         coin.mint(address(0),mintAmount);
     }
     function testMintAmountZero() external {

@@ -8,6 +8,7 @@ import {DSCEngine} from "../../src/DSCEngine.sol";
 import {DeployDSCEngine} from "../../script/DeployDSCEngine.s.sol";
 import {DecentralizedStableCoin} from "../../src/DecentralizedStableCoin.sol";
 import {DeployDecentralizedStableCoin} from "../../script/DeployDecentralizedStableCoin.s.sol";
+import {ChainConfigurator} from "../../script/ChainConfigurator.s.sol";
 
 contract DeployDSCEngineTest is Test {
     /* Errors */
@@ -19,6 +20,7 @@ contract DeployDSCEngineTest is Test {
     DeployDecentralizedStableCoin public coinDeployer;
     DSCEngine public engine;
     DeployDSCEngine public engineDeployer;
+    ChainConfigurator public config;
 
     function setUp() external {
         // deploy coin (using coin deployer)
@@ -26,7 +28,7 @@ contract DeployDSCEngineTest is Test {
         coin = coinDeployer.run();
         // deploy engine (using engine deployer)
         engineDeployer = new DeployDSCEngine();
-        engine = engineDeployer.run(address(coin));
+        (engine,config) = engineDeployer.run(address(coin));
     }
 
     // test if engine deployer performed correctly:
@@ -98,13 +100,19 @@ contract DeployDSCEngineTest is Test {
         }
         for(uint256 i=0;i<arrayLength;i++) {
             address token = allowedTokensArray[i];
-            if ((token != address(engineDeployer.mockWETH())) && 
-                (token != address(engineDeployer.mockWBTC()))) {
+            (
+                address mockWETH,
+                address mockWBTC,
+                address mockWethPriceFeed,
+                address mockWbtcPriceFeed
+            ) = config.s_activeChainConfig();
+            if ((token != mockWETH) && 
+                (token != mockWBTC)) {
                     revert DeployDSCEngineTest__IncorrectAllowedCollateralToken(token);
             }
             address priceFeed = engine.getPriceFeed(token);
-            if ((priceFeed != address(engineDeployer.mockEthPriceFeed())) &&
-                (priceFeed != address(engineDeployer.mockBtcPriceFeed()))) {
+            if ((priceFeed != mockWethPriceFeed) &&
+                (priceFeed != mockWbtcPriceFeed)) {
                     revert DeployDSCEngineTest__IncorrectPriceFeed(priceFeed);
             }
         }

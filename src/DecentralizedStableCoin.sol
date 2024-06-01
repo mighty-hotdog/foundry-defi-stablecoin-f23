@@ -20,7 +20,7 @@ contract DecentralizedStableCoin is ERC20Burnable, Ownable {
     /* Errors */
     error DecentralizedStableCoin__AmountMustBeMoreThanZero();
     error DecentralizedStableCoin__BurnAmountExceedsBalance();
-    error DecentralizedStableCoin__InvalidAddress();
+    error DecentralizedStableCoin__ReceiverAddressCannotBeZero();
 
     /* Modifiers */
     modifier moreThanZero(uint256 amount) {
@@ -49,7 +49,7 @@ contract DecentralizedStableCoin is ERC20Burnable, Ownable {
     // the inherited contracts.
     function mint(address _to, uint256 _amount) public onlyOwner moreThanZero(_amount) returns (bool) {
         if (_to == address(0)) {
-            revert DecentralizedStableCoin__InvalidAddress();
+            revert DecentralizedStableCoin__ReceiverAddressCannotBeZero();
         }
         // The _mint() function (non-virtual) is defined in the ERC20 contract, which is inherited by this 
         // contract as part of the ERC20Burnable contract.

@@ -8,23 +8,43 @@ import {DecentralizedStableCoin} from "../src/DecentralizedStableCoin.sol";
 import {DSCEngine} from "../src/DSCEngine.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 import {MockAggregatorV3} from "../test/mocks/MockAggregatorV3.sol";
+import {ChainConfigurator} from "./ChainConfigurator.s.sol";
 
 contract DeployDSCEngine is Script {
     /* Errors */
     error DeployDSCEngine__DscTokenAddressCannotBeZero();
 
     /* State Variables */
+    ChainConfigurator public chainConfig;
+    /*
+    // created ChainConfigurator to manage and provide access to these values
     // made these mock variables state public to facilitate testing
     ERC20Mock public mockWETH;
     ERC20Mock public mockWBTC;
     MockAggregatorV3 public mockEthPriceFeed;
     MockAggregatorV3 public mockBtcPriceFeed;
+    */
 
     /* Functions */
-    function run(address dscToken) external returns (DSCEngine) {
+    function run(address dscToken) external returns (DSCEngine,ChainConfigurator) {
         if (dscToken == address(0)) {
             revert DeployDSCEngine__DscTokenAddressCannotBeZero();
         }
+        chainConfig = new ChainConfigurator();
+        address[] memory allowedCollateralTokenAddresses = new address[](2);
+        address[] memory collateralTokenPriceFeedAddresses = new address[](2);
+        (
+            allowedCollateralTokenAddresses[0],
+            allowedCollateralTokenAddresses[1],
+            collateralTokenPriceFeedAddresses[0],
+            collateralTokenPriceFeedAddresses[1]
+        ) = chainConfig.s_activeChainConfig();
+        uint256 thresholdPercent = vm.envUint("THRESHOLD_PERCENT");
+        // this definition doesn't work
+        //address[2] memory allowedCollateralTokenAddresses = [weth,wbtc];
+        //address[2] memory collateralTokenPriceFeedAddresses = [wethPriceFeed,wbtcPriceFeed];
+        
+        /*
         address[] memory allowedCollateralTokenAddresses = new address[](2);
         address[] memory collateralTokenPriceFeedAddresses = new address[](2);
         uint256 thresholdPercent = vm.envUint("THRESHOLD_PERCENT");
@@ -54,6 +74,7 @@ contract DeployDSCEngine is Script {
             collateralTokenPriceFeedAddresses[0] = address(mockEthPriceFeed);
             collateralTokenPriceFeedAddresses[1] = address(mockBtcPriceFeed);
         }
+        */
 
         // deploy DSCEngine
         vm.startBroadcast();
@@ -66,6 +87,6 @@ contract DeployDSCEngine is Script {
         vm.startBroadcast(DecentralizedStableCoin(dscToken).owner());
         DecentralizedStableCoin(dscToken).transferOwnership(address(engine));
         vm.stopBroadcast();
-        return engine;
+        return (engine,chainConfig);
     }
 }

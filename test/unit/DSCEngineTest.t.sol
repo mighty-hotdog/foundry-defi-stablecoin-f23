@@ -7,20 +7,56 @@ import {DecentralizedStableCoin} from "../../src/DecentralizedStableCoin.sol";
 import {DSCEngine} from "../../src/DSCEngine.sol";
 import {DeployDecentralizedStableCoin} from "../../script/DeployDecentralizedStableCoin.s.sol";
 import {DeployDSCEngine} from "../../script/DeployDSCEngine.s.sol";
+import {ChainConfigurator} from "../../script/ChainConfigurator.s.sol";
+//import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 
 contract DSCEngineTest is Test {
     DecentralizedStableCoin public coin;
     DeployDecentralizedStableCoin public coinDeployer;
     DSCEngine public engine;
     DeployDSCEngine public engineDeployer;
+    ChainConfigurator public config;
+    address public USER;
 
+    //////////////////////////////////////////////////////////////////
+    // All events emitted by DSCEngine contract and to be tested for
+    //////////////////////////////////////////////////////////////////
+    event CollateralDeposited(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
+    event DSCMinted(address indexed toUser,uint256 indexed amount);
+    //////////////////////////////////////////////////////////////////
+
+    /* Modifiers */
+    modifier skipIfNotOnAnvil() {
+        if (block.chainid != vm.envUint("DEFAULT_ANVIL_CHAINID")) {
+            return;
+        }
+        _;
+    }
+
+    /* Setup Function */
     function setUp() external {
         // deploy coin (using coin deployer)
         coinDeployer = new DeployDecentralizedStableCoin();
         coin = coinDeployer.run();
         // deploy engine (using engine deployer)
         engineDeployer = new DeployDSCEngine();
-        engine = engineDeployer.run(address(coin));
+        (engine,config) = engineDeployer.run(address(coin));
+        // prepare prank users with appropriate balances
+        USER = makeAddr("user");
+        /*
+        (
+            address weth,
+            address wbtc,
+            address wethPriceFeed,
+            address wbtcPriceFeed
+        ) = config.s_activeChainConfig();
+        uint256 startBalance = vm.envUint("STARTING_BALANCE");
+        ERC20Mock(weth).mint(USER,startBalance);
+        ERC20Mock(wbtc).mint(USER,startBalance);
+        ERC20Mock(weth).approve(address(engine),type(uint256).max);
+        ERC20Mock(wbtc).approve(address(engine),type(uint256).max);
+        */
     }
 
     ////////////////////////////////////////////////////////////////////
@@ -78,7 +114,7 @@ contract DSCEngineTest is Test {
         new DSCEngine(arrayCollateral,arrayPriceFeed,dscTokenAddress,thresholdLimit);
     }
     // This test is considered more a deployment/integration test.
-    // It is performed in the DeployDSCEngineTest test script under:
+    // It is already performed in the DeployDSCEngineTest test script under:
     //  1. testDeployInSepoliaWithCorrectAllowedCollateralTokensAndPriceFeeds()
     //  2. testDeployInMainnetWithCorrectAllowedCollateralTokensAndPriceFeeds()
     //  3. testDeployInAnvilWithCorrectAllowedCollateralTokensAndPriceFeeds()
@@ -87,12 +123,116 @@ contract DSCEngineTest is Test {
     ////////////////////////////////////////////////////////////////////
     // Unit tests for depositCollateral()
     ////////////////////////////////////////////////////////////////////
-    function testDepositAllowedTokens() external {}
-    function testDepositNonAllowedTokens() external {}
-    function testAmountCannotBeZero() external {}
-    function testDepositStateCorrectlyUpdated() external {}
-    function testEmitCollateralDeposited() external {}
-    function testDepositTransferSuccessful() external {}
+    function testDepositTokenWithZeroAddress(uint256 randomDepositAmount) external {
+        randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
+        vm.prank(USER);
+        vm.expectRevert(DSCEngine.DSCEngine__CollateralTokenAddressCannotBeZero.selector);
+        engine.depositCollateral(address(0), randomDepositAmount);
+    }
+    function testDepositNonAllowedTokens(address randomTokenAddress,uint256 randomDepositAmount) external {
+        vm.assume(randomTokenAddress != address(0));
+        randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
+        (uint256 arraySize,address[] memory arrayTokens) = engine.getAllowedCollateralTokensArray();
+        bool isNonAllowedToken = true;
+        for(uint256 i=0;i<arraySize;i++) {
+            if (randomTokenAddress == arrayTokens[i]) {
+                isNonAllowedToken = false;
+                break;
+            }
+        }
+        if (isNonAllowedToken) {
+            // if deposit non-allowed token, revert
+            vm.prank(USER);
+            vm.expectRevert();
+            engine.depositCollateral(randomTokenAddress, randomDepositAmount);
+        }
+    }
+    function testDepositAllowedTokens(uint256 randomDepositAmount) external skipIfNotOnAnvil {
+        // this test just checks that given the inputs depositCollateral() runs with no reverts
+
+        // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
+        //  contracts on the Sepolia or Mainnet, hence this call doesn't work and we have no way
+        //  to mint the user some WETH/WBTC for the deposit call.
+        //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
+        //  mint(). Skip this test on any other chain.
+        randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
+        (uint256 arraySize,address[] memory arrayTokens) = engine.getAllowedCollateralTokensArray();
+        for(uint256 i=0;i<arraySize;i++) {
+            // preparations needed:
+            //  1. mint USER enough collateral tokens for the deposit
+            ERC20Mock(arrayTokens[i]).mint(USER,randomDepositAmount);
+            //  2. USER to approve engine as spender with enough allowance for deposit
+            vm.prank(USER);
+            ERC20Mock(arrayTokens[i]).approve(address(engine),randomDepositAmount);
+            //  3. perform the actual deposit call as USER
+            vm.prank(USER);
+            engine.depositCollateral(arrayTokens[i], randomDepositAmount);
+        }
+    }
+    function testDepositZeroAmount() external {
+        (uint256 arraySize,address[] memory arrayTokens) = engine.getAllowedCollateralTokensArray();
+        for(uint256 i=0;i<arraySize;i++) {
+            vm.prank(USER);
+            vm.expectRevert(DSCEngine.DSCEngine__AmountCannotBeZero.selector);
+            engine.depositCollateral(arrayTokens[i], 0);
+        }
+    }
+    function testDepositStateCorrectlyUpdated(uint256 randomDepositAmount) external skipIfNotOnAnvil {
+        // here we check that:
+        //  1. engine deposit records are correct
+        //  2. user balance is correct
+        //  3. engine balance is correct
+
+        // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
+        //  contracts on the Sepolia or Mainnet, hence this call doesn't work and we have no way
+        //  to mint the user some WETH/WBTC for the deposit call.
+        //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
+        //  mint(). Skip this test on any other chain.
+        randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
+        (uint256 arraySize,address[] memory arrayTokens) = engine.getAllowedCollateralTokensArray();
+        for(uint256 i=0;i<arraySize;i++) {
+            // preparations needed:
+            //  1. mint USER enough collateral tokens for the deposit
+            ERC20Mock(arrayTokens[i]).mint(USER,randomDepositAmount);
+            //  2. USER to approve engine as spender with enough allowance for deposit
+            vm.prank(USER);
+            ERC20Mock(arrayTokens[i]).approve(address(engine),randomDepositAmount);
+            //  3. perform the actual deposit call as USER
+            vm.prank(USER);
+            engine.depositCollateral(arrayTokens[i], randomDepositAmount);
+            // do the check
+            assert(
+                // check that engine deposit records are correct
+                (engine.getDepositHeld(USER, arrayTokens[i]) == randomDepositAmount) &&
+                // check that user balance is correct
+                (ERC20Mock(arrayTokens[i]).balanceOf(USER) == 0) &&
+                // check that engine balance is correct
+                (ERC20Mock(arrayTokens[i]).balanceOf(address(engine)) == randomDepositAmount)
+            );
+        }
+    }
+    function testEmitCollateralDeposited(uint256 randomDepositAmount) external skipIfNotOnAnvil {
+        // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
+        //  contracts on the Sepolia or Mainnet, hence this call doesn't work and we have no way
+        //  to mint the user some WETH/WBTC for the deposit call.
+        //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
+        //  mint(). Skip this test on any other chain.
+        randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
+        (uint256 arraySize,address[] memory arrayTokens) = engine.getAllowedCollateralTokensArray();
+        for(uint256 i=0;i<arraySize;i++) {
+            // preparations needed:
+            //  1. mint USER enough collateral tokens for the deposit
+            ERC20Mock(arrayTokens[i]).mint(USER,randomDepositAmount);
+            //  2. USER to approve engine as spender with enough allowance for deposit
+            vm.prank(USER);
+            ERC20Mock(arrayTokens[i]).approve(address(engine),randomDepositAmount);
+            //  3. perform the actual deposit call as USER
+            vm.expectEmit(true, true, true, false, address(engine));
+            emit CollateralDeposited(USER,arrayTokens[i],randomDepositAmount);
+            vm.prank(USER);
+            engine.depositCollateral(arrayTokens[i], randomDepositAmount);
+        }
+    }
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for mintDSC()
