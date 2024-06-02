@@ -40,8 +40,8 @@ contract DecentralizedStableCoin is ERC20Burnable, Ownable {
             revert DecentralizedStableCoin__BurnAmountExceedsBalance();
         }
         // The "super" keyword references a contract 1 level higher in the inheritance hierarchy.
-        // ie: in this case, this keyword instructs the EVM to call the burn() function defined in the 
-        // ERC20Burnable contract.
+        //  ie: in this case, this keyword instructs the EVM to call the burn() function defined in the 
+        //  ERC20Burnable contract.
         super.burn(_amount);
     }
 
@@ -51,8 +51,8 @@ contract DecentralizedStableCoin is ERC20Burnable, Ownable {
         if (_to == address(0)) {
             revert DecentralizedStableCoin__ReceiverAddressCannotBeZero();
         }
-        // The _mint() function (non-virtual) is defined in the ERC20 contract, which is inherited by this 
-        // contract as part of the ERC20Burnable contract.
+        // The _mint() function (non-virtual, internal) is defined in the ERC20 contract, which is 
+        //  inherited by this contract as part of the ERC20Burnable contract.
         _mint(_to,_amount);
         return true;
     }
