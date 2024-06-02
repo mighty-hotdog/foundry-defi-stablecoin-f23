@@ -20,7 +20,9 @@ import {AggregatorV3Interface} from "@chainlink/contracts/v0.8/interfaces/Aggreg
  *          Makes use of Chainlink Price Feeds.
  */
 contract DSCEngine is ReentrancyGuard {
-    /* Errors */
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /* Errors *//////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     error DSCEngine__TokenNotAllowed(address tokenAddress);
     error DSCEngine__ThresholdOutOfRange(uint256 threshold);
     error DSCEngine__AmountCannotBeZero();
@@ -34,7 +36,9 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__MintFailed(address toUser,uint256 amountMinted);
     error DSCEngine__OutOfArrayRange(uint256 maxIndex,uint256 requestedIndex);
 
-    /* State Variables */
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /* State Variables */////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     uint256 private constant FRACTION_REMOVAL_MULTIPLIER = 100;
     address private immutable i_dscToken;   // contract address for the DSC token
     uint256 private immutable i_thresholdLimitPercent;  // the single threshold limit to be applied to total value 
@@ -52,7 +56,9 @@ contract DSCEngine is ReentrancyGuard {
     // Question: Is it better here to use a mapping or an array of structs?
     mapping(address user => uint256 dscAmountHeld) s_userToDSCMintHeld;
 
-    /* Events */
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /* Events *//////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     event CollateralDeposited(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
     event DSCMinted(address indexed toUser,uint256 indexed amount);
 
@@ -115,7 +121,7 @@ contract DSCEngine is ReentrancyGuard {
         _;
     }
 
-    modifier withinMintLimitReal(address user, uint256 amountToMint) {
+    modifier withinMintLimitReal(address user, uint256 requestedMintAmount) {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Approach 2 - realistic and more flexible
         //              each allowed collateral is assigned its own threshold limit, in consideration of the volatility 
@@ -126,7 +132,13 @@ contract DSCEngine is ReentrancyGuard {
         _;
     }
 
-    /* Functions */
+    modifier withinRedeemLimitSimple(address user,address collateral,uint256 requestedRedeemAmount) {
+        _;
+    }
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /* Constructor */////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     constructor(
         address[] memory allowedCollateralTokenAddresses, 
         address[] memory collateralTokenPriceFeedAddresses, 
@@ -166,8 +178,9 @@ contract DSCEngine is ReentrancyGuard {
 
     /**
      *  @notice depositCollateral()
+     *          for any user to call, to deposit collaterals into his own account
      *  @param  collateralTokenAddress  collateral token contract address
-     *  @param  collateralAmount    amount of collateral to deposit
+     *  @param  requestedDepositAmount  amount of collateral to deposit
      *  @dev    2 checks performed:
      *              1. deposit is in allowed tokens
      *              2. deposit amount is more than zero
@@ -178,16 +191,16 @@ contract DSCEngine is ReentrancyGuard {
      */
     function depositCollateral(
         address collateralTokenAddress,
-        uint256 collateralAmount
+        uint256 requestedDepositAmount
         ) external 
         onlyAllowedTokens(collateralTokenAddress) 
-        moreThanZero(collateralAmount) 
+        moreThanZero(requestedDepositAmount) 
         nonReentrant 
         {
             //console.log("msg.sender: ",msg.sender);
             // 1st update state and send emits,
-            s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] += collateralAmount;
-            emit CollateralDeposited(msg.sender,collateralTokenAddress,collateralAmount);
+            s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] += requestedDepositAmount;
+            emit CollateralDeposited(msg.sender,collateralTokenAddress,requestedDepositAmount);
 
             // then perform actual action to effect the state change.
             
@@ -196,7 +209,7 @@ contract DSCEngine is ReentrancyGuard {
             //  of tokens. This means DSCEngine is the "spender" that the user needs to approve 1st with an
             //  appropriate allowance of the token to be transferred.
             // In this case, the "to address" to transfer the tokens to is the DSCEngine itself.
-            bool success = IERC20(collateralTokenAddress).transferFrom(msg.sender,address(this),collateralAmount);
+            bool success = IERC20(collateralTokenAddress).transferFrom(msg.sender,address(this),requestedDepositAmount);
             if (!success) {
                 // Question: Will this revert also rollback the earlier statements in this function call?
                 //  ie: Will the state change and the emit be rolled back too?
@@ -213,17 +226,25 @@ contract DSCEngine is ReentrancyGuard {
                 //  allows the caller to detect the revert and take appropriate action, such as logging the 
                 //  error or attempting alternative actions. The try/catch construct does not automatically 
                 //  revert state changes. It merely allows the caller to react to the revert condition.
-                revert DSCEngine__TransferFailed(msg.sender,address(this),collateralTokenAddress,collateralAmount);
+                revert DSCEngine__TransferFailed(msg.sender,address(this),collateralTokenAddress,requestedDepositAmount);
             }
         }
 
     function redeemCollateralBurnDSC() external {}
 
-    function redeemCollateral() external {}
+    function redeemCollateral(
+        address collateralTokenAddress,
+        uint256 requestedRedeemAmount
+        ) external 
+        onlyAllowedTokens(collateralTokenAddress) 
+        moreThanZero(requestedRedeemAmount) 
+        withinRedeemLimitSimple(msg.sender,collateralTokenAddress,requestedRedeemAmount)
+        nonReentrant {}
 
     /**
      *  @notice mintDSC()
-     *  @param  amount  amount of DSC token to be requested for mint
+     *          for a user to call, to mint DSC on his own account
+     *  @param  requestedMintAmount amount of DSC token to be requested for mint
      *  @dev    checks performed:
      *              1. mint amount is more than zero
      *              2. msg.sender's mint limit has not been breached
@@ -232,19 +253,24 @@ contract DSCEngine is ReentrancyGuard {
      *              2. emit event
      *              3. perform actual mint/token transfer
      */
-    function mintDSC(uint256 amount) external moreThanZero(amount) withinMintLimitSimple(msg.sender,amount) {
+    function mintDSC(
+        uint256 requestedMintAmount
+        ) external 
+        moreThanZero(requestedMintAmount) 
+        withinMintLimitSimple(msg.sender,requestedMintAmount) 
+    {
         // 1st update state and send emits
-        s_userToDSCMintHeld[msg.sender] += amount;
-        emit DSCMinted(msg.sender,amount);
+        s_userToDSCMintHeld[msg.sender] += requestedMintAmount;
+        emit DSCMinted(msg.sender,requestedMintAmount);
 
         // then perform actual action to effect the state change
-        bool success = DecentralizedStableCoin(i_dscToken).mint(msg.sender, amount);
+        bool success = DecentralizedStableCoin(i_dscToken).mint(msg.sender, requestedMintAmount);
         if (!success) {
-            revert DSCEngine__MintFailed(msg.sender,amount);
+            revert DSCEngine__MintFailed(msg.sender,requestedMintAmount);
         }
     }
 
-    function burnDSC(uint256 amount) external moreThanZero(amount) {}
+    function burnDSC(uint256 requestedBurnAmount) external moreThanZero(requestedBurnAmount) {}
 
     function liquidate() external {}
 
