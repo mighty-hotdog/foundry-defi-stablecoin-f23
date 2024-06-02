@@ -100,10 +100,16 @@ contract DSCEngine is ReentrancyGuard {
         //uint256 factor = (valueOfDepositsHeld * i_thresholdLimitPercent) / ((valueOfMintsHeld + requestedMintAmount) * FRACTION_REMOVAL_MULTIPLIER);
         uint256 numerator = valueOfDepositsHeld * i_thresholdLimitPercent;
         uint256 denominator = (valueOfMintsHeld + requestedMintAmount) * FRACTION_REMOVAL_MULTIPLIER;
+
         // revert if mint limit breached
         if (denominator > numerator) {
-            uint256 maxSafeMintAmount = (numerator - (valueOfMintsHeld * FRACTION_REMOVAL_MULTIPLIER)) / FRACTION_REMOVAL_MULTIPLIER;
-            // integer math may result in maxSafeMintAmount == 0, which is still logically correct
+            // Integer math may result in maxSafeMintAmount == 0, which is still logically correct.
+            // Question: Is there a way for maxSafeMintAmount to be used outside this modifier in the main 
+            //  function to indicate account's "health".
+            // Answer: No there isn't. By design, modifier variables are scope limited to be outside scope
+            //  of the main function.
+            uint256 maxSafeMintAmount = 
+                (numerator - (valueOfMintsHeld * FRACTION_REMOVAL_MULTIPLIER)) / FRACTION_REMOVAL_MULTIPLIER;
             revert DSCEngine__RequestedMintAmountBreachesUserMintLimit(user,requestedMintAmount,maxSafeMintAmount);
         }
         _;
