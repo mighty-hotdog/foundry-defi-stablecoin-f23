@@ -256,9 +256,9 @@ contract DSCEngineTest is Test {
         console.log(randomAmount," wBTC is ",engine.exposeconvertToValueInUsd(wbtc,randomAmount),"USD");
     }
     function testConvertWETHOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
-        // This test performs an assertEq() comparing function return vs mock datafeed answer in the .env,
-        //  hence it can only pass when referencing mock data feeds deployed in Anvil. Therefore skip if
-        //  on any chain other than Anvil.
+        // This test performs an assertEq() comparing function return vs mock datafeed answer set in the 
+        //  .env, hence it can only pass when referencing mock data feeds deployed in Anvil. Therefore 
+        //  skip if on any chain other than Anvil.
         randomAmount = bound(randomAmount,0,100);
         (address weth,,,) = config.s_activeChainConfig();
         uint256 returnValue = engine.exposeconvertToValueInUsd(weth,randomAmount);
@@ -266,9 +266,9 @@ contract DSCEngineTest is Test {
         assertEq(returnValue,vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD")*randomAmount/1e8);
     }
     function testConvertWBTCOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
-        // This test performs an assertEq() comparing function return vs mock datafeed answer in the .env,
-        //  hence it can only pass when referencing mock data feeds deployed in Anvil. Therefore skip if
-        //  on any chain other than Anvil.
+        // This test performs an assertEq() comparing function return vs mock datafeed answer set in the 
+        //  .env, hence it can only pass when referencing mock data feeds deployed in Anvil. Therefore 
+        //  skip if on any chain other than Anvil.
         randomAmount = bound(randomAmount,0,100);
         (,address wbtc,,) = config.s_activeChainConfig();
         uint256 returnValue = engine.exposeconvertToValueInUsd(wbtc,randomAmount);
