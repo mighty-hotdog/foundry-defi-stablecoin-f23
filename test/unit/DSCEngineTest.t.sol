@@ -353,8 +353,9 @@ contract DSCEngineTest is Test {
         //      request is **WITHIN** limit
         //  10. perform the test by calling mintDSC() for random requestedMintAmount
         //  11. check that:
-        //      a. total supply of DSC minted is correct
-        //      b. minted DSC balance held by user is correct
+        //      a. expected event emitted
+        //      b. total supply of DSC minted is correct
+        //      c. minted DSC balance held by user is correct
 
         // get token address for weth and wbtc for use later
         (address weth,address wbtc,,) = config.s_activeChainConfig();
@@ -409,15 +410,16 @@ contract DSCEngineTest is Test {
             (numerator/engine.getFractionRemovalMultiplier())-engine.exposegetValueOfMintsHeldInUsd(USER));
         //  10. perform the test by calling mintDSC() for random requestedMintAmount
         if (requestedMintAmount > 0) {
+        //  11. check that:
+        //      a. expected event emitted
             vm.expectEmit(true, true, false, false, address(engine));
             emit DSCMinted(USER,requestedMintAmount);
             vm.prank(USER);
             engine.mintDSC(requestedMintAmount);
-        //  11. check that:
-        //      a. total supply of DSC minted is correct
-        //      b. minted DSC balance held by user is correct
             assert(
+        //      b. total supply of DSC minted is correct
                 (coin.totalSupply() == valueOfMintsAlreadyHeld + requestedMintAmount) &&
+        //      c. minted DSC balance held by user is correct
                 (engine.getMintHeld(USER) == coin.totalSupply()));
         }
     }
