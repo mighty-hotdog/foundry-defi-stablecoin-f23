@@ -241,6 +241,10 @@ contract DSCEngineTest is Test {
         vm.expectRevert(DSCEngine.DSCEngine__AmountCannotBeZero.selector);
         engine.mintDSC(0);
     }
+    function testOutsideMintLimit() external {}
+    function testWithinMintLimit() external {}
+    function testMintStateCorrectlyUpdated() external {}
+    function testEmitDSCMinted() external {}
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for convertToValueInUsd()
