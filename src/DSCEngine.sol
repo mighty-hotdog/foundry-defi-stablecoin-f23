@@ -82,6 +82,23 @@ contract DSCEngine is ReentrancyGuard {
         _;
     }
 
+    // modifier restricts function caller to:
+    //  1. app contracts serving account user
+    //  2. account user
+    // Intended use is to protect user privacy in functions like:
+    //      getValueOfDepositsHeldInUsd(),
+    //      getValueOfMintsHeldInUsd(),
+    //      getDepositHeld(),
+    //      getDepositHeldArray(),
+    //      getMintHeld()
+    // Question: Is such a restriction meaningful? On blockchain user balances are already visible to everyone.
+    // Answer: Most probably yes it is meaningful.
+    // ***TODO***: Study TornadoCash design, specifically the part that protects users' privacy by using shared
+    //  crypto pools to break up direct traceability to original senders/receivers.
+    modifier onlyAllowedUsers() {
+        _;
+    }
+
     modifier withinMintLimitSimple(address user, uint256 requestedMintAmount) {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Approach 1 - simplified
@@ -174,6 +191,69 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* User-facing Functions *///////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /**
+     *  These functions serve users of the platform by providing some functionality or utility.
+     *  As such, they all make use of msg.sender to activate whatever feature/functionality they implement/provide.
+     */
+    function getAccountHealthInfo() external {
+        // returns:
+        //  1. user account status:
+        //      a. green = healthy
+        //      b. yellow = concern (specific items of concern highlighted)
+        //      c. orange = warning (specific items of concern highlighted)
+        //      d. red = suspended (in arrears amount + specific violations highlighted)
+        //  2. all deposits held by user, listed by:
+        //      a. token
+        //      b. amount
+        //      c. value in usd
+        //  3. total deposits value in usd held by user
+        //  4. total mint amount held by user
+        //  5. total mint value in usd held by user
+        //  6. all tokens held by user
+        //  7. total tokens value in usd held by user
+        //  8. all still-in-effect approvals/delegates granted by user, listed by:
+        //      a. spender
+        //      b. original amount approved
+        //      c. date of approval
+        //      d. remaining amount
+    }
+    function getAccountStatus() external {
+        // returns user account status:
+        //      a. green = healthy
+        //      b. yellow = concern (specific items of concern highlighted)
+        //      c. orange = warning (specific items of concern highlighted)
+        //      d. red = suspended (in arrears amount + specific violations highlighted)
+    }
+    function getDeposits() external {
+        // returns all deposits held by user, listed by:
+        //      a. token
+        //      b. amount
+        //      c. value in usd
+    }
+    function getDepositsValueInUsd() external {
+        // returns total deposits value in usd held by user
+    }
+    function getMints() external {
+        // returns total mint amount held by user
+    }
+    function getMintsValueInUsd() external {
+        // returns total mint value in usd held by user
+    }
+    function getTokensHeld() external {
+        // returns all tokens held by user
+    }
+    function getTokensHeldValueInUsd() external {
+        // returns total tokens value in usd held by user
+    }
+    function getApprovals() external {
+        // returns all still-in-effect approvals/delegates granted by user, listed by:
+        //      a. spender
+        //      b. original amount approved
+        //      c. date of approval
+        //      d. remaining amount
+    }
+    function cancelApproval() external {}
+    function grantApproval() external {}
     function depositCollateralMintDSC() external {}
 
     /**
@@ -196,39 +276,39 @@ contract DSCEngine is ReentrancyGuard {
         onlyAllowedTokens(collateralTokenAddress) 
         moreThanZero(requestedDepositAmount) 
         nonReentrant 
-        {
-            //console.log("msg.sender: ",msg.sender);
-            // 1st update state and send emits,
-            s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] += requestedDepositAmount;
-            emit CollateralDeposited(msg.sender,collateralTokenAddress,requestedDepositAmount);
+    {
+        //console.log("msg.sender: ",msg.sender);
+        // 1st update state and send emits,
+        s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] += requestedDepositAmount;
+        emit CollateralDeposited(msg.sender,collateralTokenAddress,requestedDepositAmount);
 
-            // then perform actual action to effect the state change.
-            
-            // Basically the external user who called depositCollateral() is msg.sender.
-            // From within depositCollateral(), the DSCEngine calls transferFrom() to make the actual transfer
-            //  of tokens. This means DSCEngine is the "spender" that the user needs to approve 1st with an
-            //  appropriate allowance of the token to be transferred.
-            // In this case, the "to address" to transfer the tokens to is the DSCEngine itself.
-            bool success = IERC20(collateralTokenAddress).transferFrom(msg.sender,address(this),requestedDepositAmount);
-            if (!success) {
-                // Question: Will this revert also rollback the earlier statements in this function call?
-                //  ie: Will the state change and the emit be rolled back too?
-                // Answer: Yes. On revert, the execution of a function is terminated. All changes to the state 
-                //  variables since the beginning of the current function call are undone, returning the state 
-                //  to what it was before the function was called. This ensures transactions remain atomic and
-                //  consistent, preventing partial updates that could lead to inconsistent states.
-                //  A revert will also roll back any events emitted earlier in the same function call.
-                // Also: Upon encountering a revert, the EVM (Ethereum Virtual Machine) refunds the unused gas 
-                //  to the caller. This is to ensure that callers are not charged for operations that were not 
-                //  completed successfully.
-                // Additionally: When a contract function calls another contract and that call reverts, the 
-                //  calling function can choose to handle the revert gracefully using a try/catch block. This 
-                //  allows the caller to detect the revert and take appropriate action, such as logging the 
-                //  error or attempting alternative actions. The try/catch construct does not automatically 
-                //  revert state changes. It merely allows the caller to react to the revert condition.
-                revert DSCEngine__TransferFailed(msg.sender,address(this),collateralTokenAddress,requestedDepositAmount);
-            }
+        // then perform actual action to effect the state change.
+        
+        // Basically the external user who called depositCollateral() is msg.sender.
+        // From within depositCollateral(), the DSCEngine calls transferFrom() to make the actual transfer
+        //  of tokens. This means DSCEngine is the "spender" that the user needs to approve 1st with an
+        //  appropriate allowance of the token to be transferred.
+        // In this case, the "to address" to transfer the tokens to is the DSCEngine itself.
+        bool success = IERC20(collateralTokenAddress).transferFrom(msg.sender,address(this),requestedDepositAmount);
+        if (!success) {
+            // Question: Will this revert also rollback the earlier statements in this function call?
+            //  ie: Will the state change and the emit be rolled back too?
+            // Answer: Yes. On revert, the execution of a function is terminated. All changes to the state 
+            //  variables since the beginning of the current function call are undone, returning the state 
+            //  to what it was before the function was called. This ensures transactions remain atomic and
+            //  consistent, preventing partial updates that could lead to inconsistent states.
+            //  A revert will also roll back any events emitted earlier in the same function call.
+            // Also: Upon encountering a revert, the EVM (Ethereum Virtual Machine) refunds the unused gas 
+            //  to the caller. This is to ensure that callers are not charged for operations that were not 
+            //  completed successfully.
+            // Additionally: When a contract function calls another contract and that call reverts, the 
+            //  calling function can choose to handle the revert gracefully using a try/catch block. This 
+            //  allows the caller to detect the revert and take appropriate action, such as logging the 
+            //  error or attempting alternative actions. The try/catch construct does not automatically 
+            //  revert state changes. It merely allows the caller to react to the revert condition.
+            revert DSCEngine__TransferFailed(msg.sender,address(this),collateralTokenAddress,requestedDepositAmount);
         }
+    }
 
     function redeemCollateralBurnDSC() external {}
 
@@ -274,8 +354,6 @@ contract DSCEngine is ReentrancyGuard {
 
     function liquidate() external {}
 
-    function getHealthStatus() external {}
-
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Internal Functions *//////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -310,7 +388,8 @@ contract DSCEngine is ReentrancyGuard {
         return (uint256(answer) * amount / 1e8);
     }
 
-    function getValueOfDepositsHeldInUsd(address user) internal view returns (uint256 valueInUsd) {
+    function getValueOfDepositsHeldInUsd(address user) internal view returns (uint256 valueInUsd) 
+    {
         // loop through all allowed collateral tokens
         for(uint256 i=0;i<s_allowedCollateralTokens.length;i++) {
             // obtain deposit amount held by user in each collateral token
@@ -343,7 +422,8 @@ contract DSCEngine is ReentrancyGuard {
     function getAllowedCollateralTokensArray() external view returns (uint256 arrayLength,address[] memory allowedTokensArray) {
         return (s_allowedCollateralTokens.length,s_allowedCollateralTokens);
     }
-    function getAllowedCollateralTokens(uint256 index) external view returns (address) {
+    function getAllowedCollateralTokens(uint256 index) external view returns (address) 
+    {
         if (index >= s_allowedCollateralTokens.length) {
             revert DSCEngine__OutOfArrayRange(s_allowedCollateralTokens.length-1,index);
         }
