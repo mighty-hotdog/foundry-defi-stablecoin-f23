@@ -33,11 +33,14 @@ contract DeployDSCEngine is Script {
         chainConfig = new ChainConfigurator();
         address[] memory allowedCollateralTokenAddresses = new address[](2);
         address[] memory collateralTokenPriceFeedAddresses = new address[](2);
+        uint256[] memory priceFeedPrecision = new uint256[](2);
         (
             allowedCollateralTokenAddresses[0],
             allowedCollateralTokenAddresses[1],
             collateralTokenPriceFeedAddresses[0],
-            collateralTokenPriceFeedAddresses[1]
+            collateralTokenPriceFeedAddresses[1],
+            priceFeedPrecision[0],
+            priceFeedPrecision[1]
         ) = chainConfig.s_activeChainConfig();
         uint256 thresholdPercent = vm.envUint("THRESHOLD_PERCENT");
         // this definition doesn't work
@@ -81,7 +84,9 @@ contract DeployDSCEngine is Script {
         DSCEngine engine = new DSCEngine(
             allowedCollateralTokenAddresses,
             collateralTokenPriceFeedAddresses,
-            dscToken,thresholdPercent);
+            priceFeedPrecision,
+            dscToken,
+            thresholdPercent);
         vm.stopBroadcast();
         // transfer ownership from initial owner to the DSCEngine
         vm.startBroadcast(DecentralizedStableCoin(dscToken).owner());

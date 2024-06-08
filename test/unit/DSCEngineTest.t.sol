@@ -65,9 +65,10 @@ contract DSCEngineTest is Test {
     function testDscTokenAddressCannotBeZero(uint256 thresholdLimit) external {
         address[] memory arrayOne;
         address[] memory arrayTwo;
+        uint256[] memory arrayThree;
         address dscTokenAddress = address(0);
         vm.expectRevert(DSCEngine.DSCEngine__DscTokenAddressCannotBeZero.selector);
-        new DSCEngine(arrayOne,arrayTwo,dscTokenAddress,thresholdLimit);
+        new DSCEngine(arrayOne,arrayTwo,arrayThree,dscTokenAddress,thresholdLimit);
     }
     function testValidDscToken() external view {
         assert(engine.getDscTokenAddress() == address(coin));
@@ -78,18 +79,27 @@ contract DSCEngineTest is Test {
     function testValidThresholdPercent() external view {
         assert(engine.getThresholdLimitPercent() == vm.envUint("THRESHOLD_PERCENT"));
     }
-    function testConstructorInputParamsMismatch(uint256 arrayOneLength,uint256 arrayTwoLength,uint256 thresholdLimit) external {
+    function testConstructorInputParamsMismatch(
+        uint256 arrayOneLength,
+        uint256 arrayTwoLength,
+        uint256 arrayThreeLength,
+        uint256 thresholdLimit) external 
+    {
         arrayOneLength = bound(arrayOneLength,2,256);
         arrayTwoLength = bound(arrayTwoLength,2,256);
+        arrayThreeLength = bound(arrayThreeLength,2,256);
         thresholdLimit = bound(thresholdLimit,1,99);
         address dscTokenAddress = makeAddr("mock token address");
-        if (arrayOneLength != arrayTwoLength) {
+        if (!((arrayOneLength == arrayTwoLength) &&
+            (arrayOneLength == arrayThreeLength))) {
             address[] memory arrayOne = new address[](arrayOneLength);
             address[] memory arrayTwo = new address[](arrayTwoLength);
+            uint256[] memory arrayThree = new uint256[](arrayThreeLength);
             console.log("arrayOne.length: ",arrayOne.length);
             console.log("arrayTwo.length: ",arrayTwo.length);
+            console.log("arrayThree.length: ",arrayThree.length);
             vm.expectRevert();
-            new DSCEngine(arrayOne,arrayTwo,dscTokenAddress,thresholdLimit);
+            new DSCEngine(arrayOne,arrayTwo,arrayThree,dscTokenAddress,thresholdLimit);
         }
     }
     function testCollateralTokenAddressCannotBeZero(uint256 arrayLength,uint256 thresholdLimit) external {
@@ -98,9 +108,10 @@ contract DSCEngineTest is Test {
         address dscTokenAddress = makeAddr("mock token address");
         address[] memory arrayCollateral = new address[](arrayLength);
         address[] memory arrayPriceFeed = new address[](arrayLength);
+        uint256[] memory arrayPrecision = new uint256[](arrayLength);
         arrayCollateral[0] = address(0);
         vm.expectRevert(DSCEngine.DSCEngine__CollateralTokenAddressCannotBeZero.selector);
-        new DSCEngine(arrayCollateral,arrayPriceFeed,dscTokenAddress,thresholdLimit);
+        new DSCEngine(arrayCollateral,arrayPriceFeed,arrayPrecision,dscTokenAddress,thresholdLimit);
     }
     function testPriceFeedAddressCannotBeZero(uint256 arrayLength,uint256 thresholdLimit) external {
         arrayLength = bound(arrayLength,2,256);
@@ -108,10 +119,11 @@ contract DSCEngineTest is Test {
         address dscTokenAddress = makeAddr("mock token address");
         address[] memory arrayCollateral = new address[](arrayLength);
         address[] memory arrayPriceFeed = new address[](arrayLength);
+        uint256[] memory arrayPrecision = new uint256[](arrayLength);
         arrayCollateral[0] = makeAddr("collateral");
         arrayPriceFeed[0] = address(0);
         vm.expectRevert(DSCEngine.DSCEngine__PriceFeedAddressCannotBeZero.selector);
-        new DSCEngine(arrayCollateral,arrayPriceFeed,dscTokenAddress,thresholdLimit);
+        new DSCEngine(arrayCollateral,arrayPriceFeed,arrayPrecision,dscTokenAddress,thresholdLimit);
     }
     // This test testCorrectAllowedCollateralTokensAndPriceFeeds() is more of a deployment/integration test.
     // It is already performed in the DeployDSCEngineTest test script under:
@@ -127,15 +139,15 @@ contract DSCEngineTest is Test {
         randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
         vm.prank(USER);
         vm.expectRevert(DSCEngine.DSCEngine__CollateralTokenAddressCannotBeZero.selector);
-        engine.depositCollateral(address(0), randomDepositAmount);
+        engine.depositCollateral(address(0),randomDepositAmount);
     }
     function testDepositNonAllowedTokens(address randomTokenAddress,uint256 randomDepositAmount) external {
         vm.assume(randomTokenAddress != address(0));
         randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
-        (uint256 arraySize,address[] memory arrayTokens) = engine.getAllowedCollateralTokensArray();
+        uint256 arraySize = engine.getAllowedCollateralTokensArrayLength();
         bool isNonAllowedToken = true;
         for(uint256 i=0;i<arraySize;i++) {
-            if (randomTokenAddress == arrayTokens[i]) {
+            if (randomTokenAddress == engine.getAllowedCollateralTokens(i)) {
                 isNonAllowedToken = false;
                 break;
             }
@@ -144,7 +156,7 @@ contract DSCEngineTest is Test {
             // if deposit non-allowed token, revert
             vm.prank(USER);
             vm.expectRevert();
-            engine.depositCollateral(randomTokenAddress, randomDepositAmount);
+            engine.depositCollateral(randomTokenAddress,randomDepositAmount);
         }
     }
     function testDepositAllowedTokens(uint256 randomDepositAmount) external skipIfNotOnAnvil {
@@ -156,25 +168,27 @@ contract DSCEngineTest is Test {
         //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
         //  mint(). Skip this test on any other chain.
         randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
-        (uint256 arraySize,address[] memory arrayTokens) = engine.getAllowedCollateralTokensArray();
+        uint256 arraySize = engine.getAllowedCollateralTokensArrayLength();
         for(uint256 i=0;i<arraySize;i++) {
+            address token = engine.getAllowedCollateralTokens(i);
             // preparations needed:
             //  1. mint USER enough collateral tokens for the deposit
-            ERC20Mock(arrayTokens[i]).mint(USER,randomDepositAmount);
+            ERC20Mock(token).mint(USER,randomDepositAmount);
             //  2. USER to approve engine as spender with enough allowance for deposit
             vm.prank(USER);
-            ERC20Mock(arrayTokens[i]).approve(address(engine),randomDepositAmount);
+            ERC20Mock(token).approve(address(engine),randomDepositAmount);
             //  3. perform the actual deposit call as USER
             vm.prank(USER);
-            engine.depositCollateral(arrayTokens[i], randomDepositAmount);
+            engine.depositCollateral(token,randomDepositAmount);
         }
     }
     function testDepositZeroAmount() external {
-        (uint256 arraySize,address[] memory arrayTokens) = engine.getAllowedCollateralTokensArray();
+        uint256 arraySize = engine.getAllowedCollateralTokensArrayLength();
         for(uint256 i=0;i<arraySize;i++) {
+            address token = engine.getAllowedCollateralTokens(i);
             vm.prank(USER);
             vm.expectRevert(DSCEngine.DSCEngine__AmountCannotBeZero.selector);
-            engine.depositCollateral(arrayTokens[i], 0);
+            engine.depositCollateral(token,0);
         }
     }
     function testDepositStateCorrectlyUpdated(uint256 randomDepositAmount) external skipIfNotOnAnvil {
@@ -189,25 +203,26 @@ contract DSCEngineTest is Test {
         //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
         //  mint(). Skip this test on any other chain.
         randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
-        (uint256 arraySize,address[] memory arrayTokens) = engine.getAllowedCollateralTokensArray();
+        uint256 arraySize = engine.getAllowedCollateralTokensArrayLength();
         for(uint256 i=0;i<arraySize;i++) {
+            address token = engine.getAllowedCollateralTokens(i);
             // preparations needed:
             //  1. mint USER enough collateral tokens for the deposit
-            ERC20Mock(arrayTokens[i]).mint(USER,randomDepositAmount);
+            ERC20Mock(token).mint(USER,randomDepositAmount);
             //  2. USER to approve engine as spender with enough allowance for deposit
             vm.prank(USER);
-            ERC20Mock(arrayTokens[i]).approve(address(engine),randomDepositAmount);
+            ERC20Mock(token).approve(address(engine),randomDepositAmount);
             //  3. perform the actual deposit call as USER
             vm.prank(USER);
-            engine.depositCollateral(arrayTokens[i], randomDepositAmount);
+            engine.depositCollateral(token,randomDepositAmount);
             // do the check
             assert(
                 // check that engine deposit records are correct
-                (engine.getDepositHeld(USER, arrayTokens[i]) == randomDepositAmount) &&
+                (engine.getDepositHeld(USER,token) == randomDepositAmount) &&
                 // check that user balance is correct
-                (ERC20Mock(arrayTokens[i]).balanceOf(USER) == 0) &&
+                (ERC20Mock(token).balanceOf(USER) == 0) &&
                 // check that engine balance is correct
-                (ERC20Mock(arrayTokens[i]).balanceOf(address(engine)) == randomDepositAmount)
+                (ERC20Mock(token).balanceOf(address(engine)) == randomDepositAmount)
             );
         }
     }
@@ -218,19 +233,20 @@ contract DSCEngineTest is Test {
         //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
         //  mint(). Skip this test on any other chain.
         randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
-        (uint256 arraySize,address[] memory arrayTokens) = engine.getAllowedCollateralTokensArray();
+        uint256 arraySize = engine.getAllowedCollateralTokensArrayLength();
         for(uint256 i=0;i<arraySize;i++) {
+            address token = engine.getAllowedCollateralTokens(i);
             // preparations needed:
             //  1. mint USER enough collateral tokens for the deposit
-            ERC20Mock(arrayTokens[i]).mint(USER,randomDepositAmount);
+            ERC20Mock(token).mint(USER,randomDepositAmount);
             //  2. USER to approve engine as spender with enough allowance for deposit
             vm.prank(USER);
-            ERC20Mock(arrayTokens[i]).approve(address(engine),randomDepositAmount);
+            ERC20Mock(token).approve(address(engine),randomDepositAmount);
             //  3. perform the actual deposit call as USER
-            vm.expectEmit(true, true, true, false, address(engine));
-            emit CollateralDeposited(USER,arrayTokens[i],randomDepositAmount);
+            vm.expectEmit(true,true,true,false,address(engine));
+            emit CollateralDeposited(USER,token,randomDepositAmount);
             vm.prank(USER);
-            engine.depositCollateral(arrayTokens[i], randomDepositAmount);
+            engine.depositCollateral(token,randomDepositAmount);
         }
     }
 
@@ -268,7 +284,7 @@ contract DSCEngineTest is Test {
         //  10. perform the test by calling mintDSC() for random requestedMintAmount and checking for revert
 
         // get token address for weth and wbtc for use later
-        (address weth,address wbtc,,) = config.s_activeChainConfig();
+        (address weth,address wbtc,,,,) = config.s_activeChainConfig();
         //  1. set arbitrary max deposit limit = 1mil USD
         uint256 maxDepositValueInUSD = 1000000;
         //  2. bound valueOfDepositsHeld by max deposit limit
@@ -358,7 +374,7 @@ contract DSCEngineTest is Test {
         //      c. minted DSC balance held by user is correct
 
         // get token address for weth and wbtc for use later
-        (address weth,address wbtc,,) = config.s_activeChainConfig();
+        (address weth,address wbtc,,,,) = config.s_activeChainConfig();
         //  1. set arbitrary max deposit limit = 1mil USD
         uint256 maxDepositValueInUSD = 1000000;
         //  2. bound valueOfDepositsHeld by max deposit limit
@@ -412,7 +428,7 @@ contract DSCEngineTest is Test {
         if (requestedMintAmount > 0) {
         //  11. check that:
         //      a. expected event emitted
-            vm.expectEmit(true, true, false, false, address(engine));
+            vm.expectEmit(true,true,false,false,address(engine));
             emit DSCMinted(USER,requestedMintAmount);
             vm.prank(USER);
             engine.mintDSC(requestedMintAmount);
@@ -432,12 +448,12 @@ contract DSCEngineTest is Test {
     ////////////////////////////////////////////////////////////////////
     function testConvertWETH(uint256 randomAmount) external view {
         randomAmount = bound(randomAmount,0,100);
-        (address weth,,,) = config.s_activeChainConfig();
+        (address weth,,,,,) = config.s_activeChainConfig();
         console.log(randomAmount," wETH is ",engine.exposeconvertToValueInUsd(weth,randomAmount),"USD");
     }
     function testConvertWBTC(uint256 randomAmount) external view {
         randomAmount = bound(randomAmount,0,100);
-        (,address wbtc,,) = config.s_activeChainConfig();
+        (,address wbtc,,,,) = config.s_activeChainConfig();
         console.log(randomAmount," wBTC is ",engine.exposeconvertToValueInUsd(wbtc,randomAmount),"USD");
     }
     function testConvertWETHOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
@@ -445,20 +461,28 @@ contract DSCEngineTest is Test {
         //  .env, hence it can only pass when referencing mock data feeds deployed in Anvil. Therefore 
         //  skip if on any chain other than Anvil.
         randomAmount = bound(randomAmount,0,100);
-        (address weth,,,) = config.s_activeChainConfig();
+        (address weth,,,,,) = config.s_activeChainConfig();
         uint256 returnValue = engine.exposeconvertToValueInUsd(weth,randomAmount);
         console.log(randomAmount," wETH is ",returnValue,"USD");
-        assertEq(returnValue,vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD")*randomAmount/1e8);
+        assertEq(
+            returnValue,
+            vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD") * 
+                randomAmount / 
+                10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_ETH_USD")));
     }
     function testConvertWBTCOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
         // This test performs an assertEq() comparing function return vs mock datafeed answer set in the 
         //  .env, hence it can only pass when referencing mock data feeds deployed in Anvil. Therefore 
         //  skip if on any chain other than Anvil.
         randomAmount = bound(randomAmount,0,100);
-        (,address wbtc,,) = config.s_activeChainConfig();
+        (,address wbtc,,,,) = config.s_activeChainConfig();
         uint256 returnValue = engine.exposeconvertToValueInUsd(wbtc,randomAmount);
         console.log(randomAmount," wBTC is ",returnValue,"USD");
-        assertEq(returnValue,vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD")*randomAmount/1e8);
+        assertEq(
+            returnValue,
+            vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD") * 
+                randomAmount / 
+                10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_BTC_USD")));
     }
 
     ////////////////////////////////////////////////////////////////////
@@ -471,17 +495,18 @@ contract DSCEngineTest is Test {
         //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
         //  mint(). Skip this test on any other chain.
         randomDepositAmount = bound(randomDepositAmount,1,100);
-        (uint256 arraySize,address[] memory arrayTokens) = engine.getAllowedCollateralTokensArray();
+        uint256 arraySize = engine.getAllowedCollateralTokensArrayLength();
         for(uint256 i=0;i<arraySize;i++) {
+            address token = engine.getAllowedCollateralTokens(i);
             // preparations needed:
             //  1. mint USER enough collateral tokens for the deposit
-            ERC20Mock(arrayTokens[i]).mint(USER,randomDepositAmount);
+            ERC20Mock(token).mint(USER,randomDepositAmount);
             //  2. USER to approve engine as spender with enough allowance for deposit
             vm.prank(USER);
-            ERC20Mock(arrayTokens[i]).approve(address(engine),randomDepositAmount);
+            ERC20Mock(token).approve(address(engine),randomDepositAmount);
             //  3. perform the actual deposit call as USER
             vm.prank(USER);
-            engine.depositCollateral(arrayTokens[i], randomDepositAmount);
+            engine.depositCollateral(token,randomDepositAmount);
             console.log("Deposit #",i+1,": ",randomDepositAmount);
         }
         uint256 returnValue = engine.exposegetValueOfDepositsHeldInUsd(USER);
@@ -489,8 +514,12 @@ contract DSCEngineTest is Test {
         assertEq(
             returnValue,
             (
-                (vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD")*randomDepositAmount/1e8) + 
-                (vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD")*randomDepositAmount/1e8)
+                (vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD") * 
+                    randomDepositAmount / 
+                    10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_ETH_USD"))) + 
+                (vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD") * 
+                    randomDepositAmount / 
+                    10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_BTC_USD")))
             )
         );
     }

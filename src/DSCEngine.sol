@@ -26,9 +26,13 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__TokenNotAllowed(address tokenAddress);
     error DSCEngine__ThresholdOutOfRange(uint256 threshold);
     error DSCEngine__AmountCannotBeZero();
-    error DSCEngine__ConstructorInputParamsMismatch(uint256 lengthOfCollateralAddressesArray,uint256 lengthOfPriceFeedsArray);
+    error DSCEngine__ConstructorInputParamsMismatch(
+        uint256 lengthOfCollateralAddressesArray,
+        uint256 lengthOfPriceFeedsArray,
+        uint256 lengthOfPriceFeedsPrecisionArray);
     error DSCEngine__CollateralTokenAddressCannotBeZero();
     error DSCEngine__PriceFeedAddressCannotBeZero();
+    error DSCEngine__PriceFeedPrecisionCannotBeZero();
     error DSCEngine__DscTokenAddressCannotBeZero();
     error DSCEngine__TransferFailed(address from,address to,address collateralTokenAddress,uint256 amount);
     error DSCEngine__RequestedMintAmountBreachesUserMintLimit(address user,uint256 requestedMintAmount,uint256 maxSafeMintAmount);
@@ -37,7 +41,15 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__OutOfArrayRange(uint256 maxIndex,uint256 requestedIndex);
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    /* State Variables */////////////////////////////////////////////////////////////////////////////////////////////////
+    /* Custom Types *////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    struct PriceFeed {
+        address priceFeed;
+        uint256 precision;
+    }
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /* State Variables - Generics *//////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     uint256 private constant FRACTION_REMOVAL_MULTIPLIER = 100;
     address private immutable i_dscToken;   // contract address for the DSC token
@@ -46,15 +58,19 @@ contract DSCEngine is ReentrancyGuard {
                                                         // NOTE: value is code-enforced to range between 1 and 99 inclusive
     // array of all allowed collateral tokens
     address[] private s_allowedCollateralTokens;
-    // maps each allowed collateral token to its respective price feed
-    mapping(address allowedTokenAddress => address tokenPriceFeed) private s_tokenToPriceFeed;
+    // maps each allowed collateral token to its respective price feed and the associated precision of the price feed
+    mapping(address allowedTokenAddress => PriceFeed tokenPriceFeed) private s_tokenToPriceFeed;
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /* State Variables - User Records & Information *////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // maps each existing user to collateral token, to the amount of deposit he currently holds in that token
     // Question: Is it better here to use a mapping or an array of structs?
     mapping(address user => mapping(address collateralTokenAddress => uint256 amountOfCurrentDeposit)) 
         private s_userToCollateralDepositHeld;
     // maps each existing user to the amount of DSC he has minted and currently holds
     // Question: Is it better here to use a mapping or an array of structs?
-    mapping(address user => uint256 dscAmountHeld) s_userToDSCMintHeld;
+    mapping(address user => uint256 dscAmountHeld) private s_userToDSCMintHeld;
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Events *//////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -69,7 +85,7 @@ contract DSCEngine is ReentrancyGuard {
         if (collateralAddress == address(0)) {
             revert DSCEngine__CollateralTokenAddressCannotBeZero();
         }
-        if (s_tokenToPriceFeed[collateralAddress] == address(0)) {
+        if (s_tokenToPriceFeed[collateralAddress].priceFeed == address(0)) {
             revert DSCEngine__TokenNotAllowed(collateralAddress);
         }
         _;
@@ -92,7 +108,7 @@ contract DSCEngine is ReentrancyGuard {
     //      getDepositHeldArray(),
     //      getMintHeld()
     // Question: Is such a restriction meaningful? On blockchain user balances are already visible to everyone.
-    // Answer: Most probably yes it is meaningful.
+    // Answer: Yes it is meaningful.
     // ***TODO***: Study TornadoCash design, specifically the part that protects users' privacy by using shared
     //  crypto pools to break up direct traceability to original senders/receivers.
     modifier onlyAllowedUsers() {
@@ -111,16 +127,20 @@ contract DSCEngine is ReentrancyGuard {
         // calc/obtain total value of user's mints so far //////////////
         uint256 valueOfMintsHeld = getValueOfMintsHeldInUsd(user);
         // subject the 2 values to algo check //////////////////////////
-        /* Algorithm Description
+        /* Algorithm:
+         *  uint256 factor = (valueOfDepositsHeld * i_thresholdLimitPercent) / 
+         *                      ((valueOfMintsHeld + requestedMintAmount) * FRACTION_REMOVAL_MULTIPLIER);
+         *      factor > 1  ie: account is healthy
+         *      factor < 1  ie: account is in arrears
+         * Algorithm Description & Explanation
          * i_thresholdLimitPercent is the single threshold limit in percentage.
          *  eg: if threshold limit is 80%, then i_thresholdLimitPercent = 80
          * FRACTION_REMOVAL_MULTIPLIER is the multiplication factor needed to remove fractions.
          *  eg: if i_thresholdLimitPercent = 80, then FRACTION_REMOVAL_MULTIPLIER = 100
-         *  because threshold value of deposits held = (valueOfDepositsHeld * i_thresholdLimitPercent) / 100
-         *  but to remove fractions and deal solely in integers, need to multiply by 100.
-         *  similiarly, the denominator valueOfMintsHeld also needs to be multiplied by 100.
+         *  This is needed because threshold value of deposits held = (valueOfDepositsHeld * i_thresholdLimitPercent) / 100.
+         *  But to remove fractions and deal solely in integers, need to multiply by 100.
+         *  Similiarly, the denominator (valueOfMintsHeld + requestedMintAmount) also needs to be multiplied by 100.
          */
-        //uint256 factor = (valueOfDepositsHeld * i_thresholdLimitPercent) / ((valueOfMintsHeld + requestedMintAmount) * FRACTION_REMOVAL_MULTIPLIER);
         uint256 numerator = valueOfDepositsHeld * i_thresholdLimitPercent;
         uint256 denominator = (valueOfMintsHeld + requestedMintAmount) * FRACTION_REMOVAL_MULTIPLIER;
 
@@ -159,6 +179,7 @@ contract DSCEngine is ReentrancyGuard {
     constructor(
         address[] memory allowedCollateralTokenAddresses, 
         address[] memory collateralTokenPriceFeedAddresses, 
+        uint256[] memory priceFeedPrecision,
         address dscToken,
         uint256 thresholdPercent
         ) 
@@ -169,10 +190,12 @@ contract DSCEngine is ReentrancyGuard {
         if ((thresholdPercent < 1) || (thresholdPercent > 99)) {
             revert DSCEngine__ThresholdOutOfRange(thresholdPercent);
         }
-        if (allowedCollateralTokenAddresses.length != collateralTokenPriceFeedAddresses.length) {
+        if (!((allowedCollateralTokenAddresses.length == collateralTokenPriceFeedAddresses.length) &&
+            (allowedCollateralTokenAddresses.length == priceFeedPrecision.length))) {
             revert DSCEngine__ConstructorInputParamsMismatch(
                 allowedCollateralTokenAddresses.length,
-                collateralTokenPriceFeedAddresses.length);
+                collateralTokenPriceFeedAddresses.length,
+                priceFeedPrecision.length);
         }
         for(uint256 i=0;i<allowedCollateralTokenAddresses.length;i++) {
             if (allowedCollateralTokenAddresses[i] == address(0)) {
@@ -181,7 +204,12 @@ contract DSCEngine is ReentrancyGuard {
             if (collateralTokenPriceFeedAddresses[i] == address(0)) {
                 revert DSCEngine__PriceFeedAddressCannotBeZero();
             }
-            s_tokenToPriceFeed[allowedCollateralTokenAddresses[i]] = collateralTokenPriceFeedAddresses[i];
+            if (priceFeedPrecision[i] == 0) {
+                revert DSCEngine__PriceFeedPrecisionCannotBeZero();
+            }
+            s_tokenToPriceFeed[allowedCollateralTokenAddresses[i]] = PriceFeed({
+                priceFeed: collateralTokenPriceFeedAddresses[i],
+                precision: priceFeedPrecision[i]});
             s_allowedCollateralTokens.push(allowedCollateralTokenAddresses[i]);
         }
         i_dscToken = dscToken;
@@ -193,6 +221,7 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /**
      *  These functions serve users of the platform by providing some functionality or utility.
+     *  Each function is meant to be called directly by the user.
      *  As such, they all make use of msg.sender to activate whatever feature/functionality they implement/provide.
      */
     function getAccountHealthInfo() external {
@@ -263,7 +292,7 @@ contract DSCEngine is ReentrancyGuard {
      *          for any user to call, to deposit collaterals into his own account
      *  @param  collateralTokenAddress  collateral token contract address
      *  @param  requestedDepositAmount  amount of collateral to deposit
-     *  @dev    2 checks performed:
+     *  @dev    checks performed:
      *              1. deposit is in allowed tokens
      *              2. deposit amount is more than zero
      *          if both checks passed, then proceed to:
@@ -279,7 +308,6 @@ contract DSCEngine is ReentrancyGuard {
         moreThanZero(requestedDepositAmount) 
         nonReentrant 
     {
-        //console.log("msg.sender: ",msg.sender);
         // 1st update state and send emits,
         s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] += requestedDepositAmount;
         emit CollateralDeposited(msg.sender,collateralTokenAddress,requestedDepositAmount);
@@ -312,24 +340,13 @@ contract DSCEngine is ReentrancyGuard {
         }
     }
 
-    function redeemCollateralBurnDSC() external {}
-
-    function redeemCollateral(
-        address collateralTokenAddress,
-        uint256 requestedRedeemAmount
-        ) external 
-        onlyAllowedTokens(collateralTokenAddress) 
-        moreThanZero(requestedRedeemAmount) 
-        withinRedeemLimitSimple(msg.sender,collateralTokenAddress,requestedRedeemAmount)
-        nonReentrant {}
-
     /**
      *  @notice mintDSC()
      *          for a user to call, to mint DSC on his own account
      *  @param  requestedMintAmount amount of DSC token to be requested for mint
      *  @dev    checks performed:
      *              1. mint amount is more than zero
-     *              2. msg.sender's mint limit has not been breached
+     *              2. msg.sender's mint limit is not been breached while taking into consideration the requested mint amount
      *          if both checks passed, then proceed:
      *              1. record mint (ie: change internal state)
      *              2. emit event
@@ -352,6 +369,17 @@ contract DSCEngine is ReentrancyGuard {
         }
     }
 
+    function redeemCollateralBurnDSC() external {}
+
+    function redeemCollateral(
+        address collateralTokenAddress,
+        uint256 requestedRedeemAmount
+        ) external 
+        onlyAllowedTokens(collateralTokenAddress) 
+        moreThanZero(requestedRedeemAmount) 
+        withinRedeemLimitSimple(msg.sender,collateralTokenAddress,requestedRedeemAmount)
+        nonReentrant {}
+
     function burnDSC(uint256 requestedBurnAmount) external moreThanZero(requestedBurnAmount) {}
 
     function liquidate() external {}
@@ -369,7 +397,7 @@ contract DSCEngine is ReentrancyGuard {
             return 0;
         }
         // obtain price feed address
-        address priceFeed = s_tokenToPriceFeed[token];
+        address priceFeed = s_tokenToPriceFeed[token].priceFeed;
         // obtain token price from price feed
         (,int answer,,,) = AggregatorV3Interface(priceFeed).latestRoundData();
         if (answer <= 0) {
@@ -382,12 +410,13 @@ contract DSCEngine is ReentrancyGuard {
         //  So according to Updraft, correct return value = (uint256(answer) * 1e10 * amount) / 1e18
         //  Why? Dunno.
         //  Ok so Updraft made it unnecessarily complicated.
-        //  Basically Chainlink Price Feed returns: int answer = (actual price in USD) * (1e8)
+        //  Basically Chainlink Price Feed returns: int answer = (actual price in USD) * (decimal precision)
         //  So to obtain value in USD for amountOfTokens:
-        //      (answer * amountOfTokens) / 1e8
+        //      (answer * amountOfTokens) / (decimal precision)
         //  Since this expression must yield an integer, it means that this value is rounded off to 
         //  the nearest dollar, with the decimal values (ie: cents) being truncated off.
-        return (uint256(answer) * amount / 1e8);
+        uint256 decimalPrecision = 10**(AggregatorV3Interface(priceFeed).decimals());
+        return (uint256(answer) * amount / decimalPrecision);
     }
 
     function getValueOfDepositsHeldInUsd(address user) internal view returns (uint256 valueInUsd) 
@@ -405,7 +434,7 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     function getValueOfMintsHeldInUsd(address user) internal view returns (uint256 valueInUsd) {
-        // since DSC token is USD pegged 1:1, no extra logic needed to convert DSC token to USD value
+        // since DSC token is USD-pegged 1:1, no extra logic needed to convert DSC token amount to its equivalent USD value
         return s_userToDSCMintHeld[user];
     }
 
@@ -421,8 +450,19 @@ contract DSCEngine is ReentrancyGuard {
     function getThresholdLimitPercent() external view returns (uint256) {
         return i_thresholdLimitPercent;
     }
+    // This function is UNSAFE as it returns the internal array s_allowedCollateralTokens by reference,
+    //  allowing the array to be modified outside of this function or even outside of the contract.
+    // The safer way to access the contents of s_allowedCollateralTokens is to retrieve its length by
+    //  calling getAllowedCollateralTokensArrayLength(), and then access its elements 1 by 1 by calling 
+    //  getAllowedCollateralTokens(). The return values for these 2 functions are "pass-by-value" and 
+    //  will not modify the contents of the internal array s_allowedCollateralTokens.
+    /*
     function getAllowedCollateralTokensArray() external view returns (uint256 arrayLength,address[] memory allowedTokensArray) {
         return (s_allowedCollateralTokens.length,s_allowedCollateralTokens);
+    }
+    */
+    function getAllowedCollateralTokensArrayLength() external view returns (uint256) {
+        return s_allowedCollateralTokens.length;
     }
     function getAllowedCollateralTokens(uint256 index) external view returns (address) 
     {
@@ -431,8 +471,8 @@ contract DSCEngine is ReentrancyGuard {
         }
         return s_allowedCollateralTokens[index];
     }
-    function getPriceFeed(address token) external view onlyAllowedTokens(token) returns (address) {
-        return s_tokenToPriceFeed[token];
+    function getPriceFeed(address token) external view onlyAllowedTokens(token) returns (address,uint256) {
+        return (s_tokenToPriceFeed[token].priceFeed,s_tokenToPriceFeed[token].precision);
     }
     function getDepositHeld(address user,address token) external view onlyAllowedTokens(token) returns (uint256) {
         return s_userToCollateralDepositHeld[user][token];
