@@ -212,10 +212,11 @@ contract DSCEngine is ReentrancyGuard {
         //  6. all tokens held by user
         //  7. total tokens value in usd held by user
         //  8. all still-in-effect approvals/delegates granted by user, listed by:
-        //      a. spender
-        //      b. original amount approved
-        //      c. date of approval
-        //      d. remaining amount
+        //      a. status (in-effect,depleted,cancelled)
+        //      b. spender
+        //      c. original amount approved
+        //      d. datetime of approval
+        //      e. remaining amount
     }
     function getAccountStatus() external {
         // returns user account status:
@@ -247,10 +248,11 @@ contract DSCEngine is ReentrancyGuard {
     }
     function getApprovals() external {
         // returns all still-in-effect approvals/delegates granted by user, listed by:
-        //      a. spender
-        //      b. original amount approved
-        //      c. date of approval
-        //      d. remaining amount
+        //      a. status (in-effect,depleted,cancelled)
+        //      b. spender
+        //      c. original amount approved
+        //      d. datetime of approval
+        //      e. remaining amount
     }
     function cancelApproval() external {}
     function grantApproval() external {}
