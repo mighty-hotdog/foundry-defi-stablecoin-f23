@@ -355,6 +355,9 @@ contract DSCEngine is ReentrancyGuard {
     function getDepositHeld(address user,address token) external view onlyAllowedTokens(token) returns (uint256) {
         return s_userToCollateralDepositHeld[user][token];
     }
+    function getMintHeld(address user) external view returns (uint256) {
+        return s_userToDSCMintHeld[user];
+    }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /**

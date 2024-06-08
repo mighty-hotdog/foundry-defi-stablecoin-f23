@@ -113,7 +113,7 @@ contract DSCEngineTest is Test {
         vm.expectRevert(DSCEngine.DSCEngine__PriceFeedAddressCannotBeZero.selector);
         new DSCEngine(arrayCollateral,arrayPriceFeed,dscTokenAddress,thresholdLimit);
     }
-    // This test is considered more a deployment/integration test.
+    // This test testCorrectAllowedCollateralTokensAndPriceFeeds() is more of a deployment/integration test.
     // It is already performed in the DeployDSCEngineTest test script under:
     //  1. testDeployInSepoliaWithCorrectAllowedCollateralTokensAndPriceFeeds()
     //  2. testDeployInMainnetWithCorrectAllowedCollateralTokensAndPriceFeeds()
@@ -241,10 +241,189 @@ contract DSCEngineTest is Test {
         vm.expectRevert(DSCEngine.DSCEngine__AmountCannotBeZero.selector);
         engine.mintDSC(0);
     }
-    function testOutsideMintLimit() external {}
-    function testWithinMintLimit() external {}
-    function testMintStateCorrectlyUpdated() external {}
-    function testEmitDSCMinted() external {}
+    function testMintOutsideLimit(
+        uint256 requestedMintAmount,
+        uint256 valueOfDepositsHeld,
+        uint256 wethDepositAmount,
+        uint256 wbtcDepositAmount,
+        uint256 valueOfMintsAlreadyHeld
+        ) external skipIfNotOnAnvil {
+        // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
+        //  contracts on the Sepolia or Mainnet, hence this call doesn't work on those chains 
+        //  and we have no way to mint the user some WETH/WBTC for the deposit call.
+        //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
+        //  mint(). Skip this test on any other chain.
+        
+        // how to test mintDSC()
+        //  1. set arbitrary max deposit limit = 1mil USD
+        //  2. bound valueOfDepositsHeld by max deposit limit
+        //  3. bound wethDepositAmount by max deposit limit
+        //  4. bound wbtcDepositAmount by max deposit limit for a particular random wethDepositAmount value
+        //  5. deposit random weth and wbtc amounts via depositCollateral()
+        //  6. calc numerator, ie: valueOfDepositsHeld * thresholdLimit
+        //  7. bound valueOfMintsAlreadyHeld by numerator / FRACTION_REMOVAL_MULTIPLIER
+        //  8. mint valueOfMintsAlreadyHeld via mintDSC()
+        //  9. bound requestedMintAmount for a particular random valueOfMintsAlreadyHeld value such that mint
+        //      request is **OUTSIDE** limit
+        //  10. perform the test by calling mintDSC() for random requestedMintAmount and checking for revert
+
+        // get token address for weth and wbtc for use later
+        (address weth,address wbtc,,) = config.s_activeChainConfig();
+        //  1. set arbitrary max deposit limit = 1mil USD
+        uint256 maxDepositValueInUSD = 1000000;
+        //  2. bound valueOfDepositsHeld by max deposit limit
+        valueOfDepositsHeld = bound(valueOfDepositsHeld,1,maxDepositValueInUSD);
+        // get mock price of weth from .env
+        uint256 wethPriceInUSD = 
+            vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD") / 
+            10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_ETH_USD"));
+        //  3. bound wethDepositAmount by max deposit limit
+        wethDepositAmount = bound(wethDepositAmount,0,maxDepositValueInUSD/wethPriceInUSD);
+        // get mock price of wbtc from .env
+        uint256 wbtcPriceInUSD = 
+            vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD") / 
+            10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_BTC_USD"));
+        //  4. bound wbtcDepositAmount by max deposit limit for a particular random wethDepositAmount value
+        wbtcDepositAmount = bound(
+            wbtcDepositAmount,
+            0,
+            (maxDepositValueInUSD - engine.exposeconvertToValueInUsd(weth,wethDepositAmount)) / wbtcPriceInUSD);
+        //  5. deposit random weth and wbtc amounts via depositCollateral()
+        if (wethDepositAmount > 0) {
+            ERC20Mock(weth).mint(USER,wethDepositAmount);
+            vm.startPrank(USER);
+            ERC20Mock(weth).approve(address(engine),wethDepositAmount);
+            engine.depositCollateral(weth,wethDepositAmount);
+            vm.stopPrank();
+        }
+        if (wbtcDepositAmount > 0) {
+            ERC20Mock(wbtc).mint(USER,wbtcDepositAmount);
+            vm.startPrank(USER);
+            ERC20Mock(wbtc).approve(address(engine),wbtcDepositAmount);
+            engine.depositCollateral(wbtc,wbtcDepositAmount);
+            vm.stopPrank();
+        }
+        //  6. calc numerator, ie: valueOfDepositsHeld * thresholdLimit
+        uint256 numerator = engine.exposegetValueOfDepositsHeldInUsd(USER) * engine.getThresholdLimitPercent();
+        //  7. bound valueOfMintsAlreadyHeld by numerator / FRACTION_REMOVAL_MULTIPLIER
+        valueOfMintsAlreadyHeld = bound(valueOfMintsAlreadyHeld,0,numerator/engine.getFractionRemovalMultiplier());
+        //  8. mint valueOfMintsAlreadyHeld via mintDSC()
+        if (valueOfMintsAlreadyHeld > 0) {
+            vm.prank(USER);
+            engine.mintDSC(valueOfMintsAlreadyHeld);
+        }
+        //  9. bound requestedMintAmount for a particular random valueOfMintsAlreadyHeld value such that mint
+        //      request is **OUTSIDE** limit
+        requestedMintAmount = bound(
+            requestedMintAmount,
+            (numerator/engine.getFractionRemovalMultiplier())-engine.exposegetValueOfMintsHeldInUsd(USER)+1,
+            maxDepositValueInUSD);
+        //  10. perform the test by calling mintDSC() for random requestedMintAmount and checking for revert
+        vm.prank(USER);
+        vm.expectRevert();
+        engine.mintDSC(requestedMintAmount);
+    }
+
+    // Skipped. This test testMintWithinLimit() is already implicitly performed in testMintStateCorrectlyUpdated().
+    //function testMintWithinLimit() external {}
+
+    function testMintStateCorrectlyUpdated(
+        uint256 requestedMintAmount,
+        uint256 valueOfDepositsHeld,
+        uint256 wethDepositAmount,
+        uint256 wbtcDepositAmount,
+        uint256 valueOfMintsAlreadyHeld
+        ) external skipIfNotOnAnvil {
+        // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
+        //  contracts on the Sepolia or Mainnet, hence this call doesn't work on those chains 
+        //  and we have no way to mint the user some WETH/WBTC for the deposit call.
+        //  So run this test only on Anvil where the Mock ERC20 token deployed does implement
+        //  mint(). Skip this test on any other chain.
+        
+        // how to test mintDSC()
+        //  1. set arbitrary max deposit limit = 1mil USD
+        //  2. bound valueOfDepositsHeld by max deposit limit
+        //  3. bound wethDepositAmount by max deposit limit
+        //  4. bound wbtcDepositAmount by max deposit limit for a particular random wethDepositAmount value
+        //  5. deposit random weth and wbtc amounts via depositCollateral()
+        //  6. calc numerator, ie: valueOfDepositsHeld * thresholdLimit
+        //  7. bound valueOfMintsAlreadyHeld by numerator / FRACTION_REMOVAL_MULTIPLIER
+        //  8. mint valueOfMintsAlreadyHeld via mintDSC()
+        //  9. bound requestedMintAmount for a particular random valueOfMintsAlreadyHeld value such that mint
+        //      request is **WITHIN** limit
+        //  10. perform the test by calling mintDSC() for random requestedMintAmount
+        //  11. check that:
+        //      a. total supply of DSC minted is correct
+        //      b. minted DSC balance held by user is correct
+
+        // get token address for weth and wbtc for use later
+        (address weth,address wbtc,,) = config.s_activeChainConfig();
+        //  1. set arbitrary max deposit limit = 1mil USD
+        uint256 maxDepositValueInUSD = 1000000;
+        //  2. bound valueOfDepositsHeld by max deposit limit
+        valueOfDepositsHeld = bound(valueOfDepositsHeld,1,maxDepositValueInUSD);
+        // get mock price of weth from .env
+        uint256 wethPriceInUSD = 
+            vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD") / 
+            10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_ETH_USD"));
+        //  3. bound wethDepositAmount by max deposit limit
+        wethDepositAmount = bound(wethDepositAmount,0,maxDepositValueInUSD/wethPriceInUSD);
+        // get mock price of wbtc from .env
+        uint256 wbtcPriceInUSD = 
+            vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD") / 
+            10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_BTC_USD"));
+        //  4. bound wbtcDepositAmount by max deposit limit for a particular random wethDepositAmount value
+        wbtcDepositAmount = bound(
+            wbtcDepositAmount,
+            0,
+            (maxDepositValueInUSD - engine.exposeconvertToValueInUsd(weth,wethDepositAmount)) / wbtcPriceInUSD);
+        //  5. deposit random weth and wbtc amounts via depositCollateral()
+        if (wethDepositAmount > 0) {
+            ERC20Mock(weth).mint(USER,wethDepositAmount);
+            vm.startPrank(USER);
+            ERC20Mock(weth).approve(address(engine),wethDepositAmount);
+            engine.depositCollateral(weth,wethDepositAmount);
+            vm.stopPrank();
+        }
+        if (wbtcDepositAmount > 0) {
+            ERC20Mock(wbtc).mint(USER,wbtcDepositAmount);
+            vm.startPrank(USER);
+            ERC20Mock(wbtc).approve(address(engine),wbtcDepositAmount);
+            engine.depositCollateral(wbtc,wbtcDepositAmount);
+            vm.stopPrank();
+        }
+        //  6. calc numerator, ie: valueOfDepositsHeld * thresholdLimit
+        uint256 numerator = engine.exposegetValueOfDepositsHeldInUsd(USER) * engine.getThresholdLimitPercent();
+        //  7. bound valueOfMintsAlreadyHeld by numerator / FRACTION_REMOVAL_MULTIPLIER
+        valueOfMintsAlreadyHeld = bound(valueOfMintsAlreadyHeld,0,numerator/engine.getFractionRemovalMultiplier());
+        //  8. mint valueOfMintsAlreadyHeld via mintDSC()
+        if (valueOfMintsAlreadyHeld > 0) {
+            vm.prank(USER);
+            engine.mintDSC(valueOfMintsAlreadyHeld);
+        }
+        //  9. bound requestedMintAmount for a particular random valueOfMintsAlreadyHeld value such that mint
+        //      request is **WITHIN** limit
+        requestedMintAmount = bound(
+            requestedMintAmount,
+            0,
+            (numerator/engine.getFractionRemovalMultiplier())-engine.exposegetValueOfMintsHeldInUsd(USER));
+        //  10. perform the test by calling mintDSC() for random requestedMintAmount
+        if (requestedMintAmount > 0) {
+            vm.expectEmit(true, true, false, false, address(engine));
+            emit DSCMinted(USER,requestedMintAmount);
+            vm.prank(USER);
+            engine.mintDSC(requestedMintAmount);
+        //  11. check that:
+        //      a. total supply of DSC minted is correct
+        //      b. minted DSC balance held by user is correct
+            assert(
+                (coin.totalSupply() == valueOfMintsAlreadyHeld + requestedMintAmount) &&
+                (engine.getMintHeld(USER) == coin.totalSupply()));
+        }
+    }
+
+    // Skipped. This test testEmitDSCMinted() is already performed in testMintStateCorrectlyUpdated().
+    //function testEmitDSCMinted() external {}
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for convertToValueInUsd()
