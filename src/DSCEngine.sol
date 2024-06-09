@@ -35,10 +35,15 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__PriceFeedPrecisionCannotBeZero();
     error DSCEngine__DscTokenAddressCannotBeZero();
     error DSCEngine__TransferFailed(address from,address to,address collateralTokenAddress,uint256 amount);
-    error DSCEngine__RequestedMintAmountBreachesUserMintLimit(address user,uint256 requestedMintAmount,uint256 maxSafeMintAmount);
+    error DSCEngine__RequestedMintAmountBreachesUserMintLimit(
+        address user,uint256 requestedMintAmount,uint256 maxSafeMintAmount);
     error DSCEngine__DataFeedError(address tokenAddress, address priceFeedAddress, int answer);
     error DSCEngine__MintFailed(address toUser,uint256 amountMinted);
     error DSCEngine__OutOfArrayRange(uint256 maxIndex,uint256 requestedIndex);
+    error DSCEngine__RequestedRedeemAmountExceedsBalance(
+        address user,address requestedRedeemCollateral,uint256 requestedRedeemAmount);
+    error DSCEngine__RequestedRedeemAmountBreachesUserRedeemLimit(
+        address user,address requestedRedeemCollateral,uint256 requestedRedeemAmount,uint256 maxSafeRedeemAmount);
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Custom Types *////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -77,6 +82,7 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     event CollateralDeposited(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
     event DSCMinted(address indexed toUser,uint256 indexed amount);
+    event CollateralRedeemed(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Modifiers *///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -169,7 +175,28 @@ contract DSCEngine is ReentrancyGuard {
         _;
     }
 
+    modifier sufficientBalance(address user,address collateral,uint256 requestedRedeemAmount) {
+        uint256 depositHeld = s_userToCollateralDepositHeld[user][collateral];
+        if (depositHeld < requestedRedeemAmount) {
+            revert DSCEngine__RequestedRedeemAmountExceedsBalance(user,collateral,requestedRedeemAmount);
+        }
+        _;
+    }
+
     modifier withinRedeemLimitSimple(address user,address collateral,uint256 requestedRedeemAmount) {
+        uint256 valueOfDepositsHeld = getValueOfDepositsHeldInUsd(user);
+        uint256 valueOfMintsHeld = getValueOfMintsHeldInUsd(user);
+        uint256 valueOfRequestedRedeemAmount = convertToUsd(collateral,requestedRedeemAmount);
+        uint256 numerator = (valueOfDepositsHeld - valueOfRequestedRedeemAmount) * i_thresholdLimitPercent;
+        uint256 denominator = valueOfMintsHeld * FRACTION_REMOVAL_MULTIPLIER;
+
+        if (denominator > numerator) {
+            uint256 maxSafeRedeemAmount = 
+                ((valueOfDepositsHeld * i_thresholdLimitPercent) - denominator) / i_thresholdLimitPercent;
+            maxSafeRedeemAmount = convertFromUsd(maxSafeRedeemAmount,collateral);
+            revert DSCEngine__RequestedRedeemAmountBreachesUserRedeemLimit(
+                user,collateral,requestedRedeemAmount,maxSafeRedeemAmount);
+        }
         _;
     }
 
@@ -304,8 +331,8 @@ contract DSCEngine is ReentrancyGuard {
         address collateralTokenAddress,
         uint256 requestedDepositAmount
         ) external 
-        onlyAllowedTokens(collateralTokenAddress) 
         moreThanZero(requestedDepositAmount) 
+        onlyAllowedTokens(collateralTokenAddress) 
         nonReentrant 
     {
         // 1st update state and send emits,
@@ -357,6 +384,7 @@ contract DSCEngine is ReentrancyGuard {
         ) external 
         moreThanZero(requestedMintAmount) 
         withinMintLimitSimple(msg.sender,requestedMintAmount) 
+        nonReentrant
     {
         // 1st update state and send emits
         s_userToDSCMintHeld[msg.sender] += requestedMintAmount;
@@ -375,19 +403,62 @@ contract DSCEngine is ReentrancyGuard {
         address collateralTokenAddress,
         uint256 requestedRedeemAmount
         ) external 
-        onlyAllowedTokens(collateralTokenAddress) 
         moreThanZero(requestedRedeemAmount) 
-        withinRedeemLimitSimple(msg.sender,collateralTokenAddress,requestedRedeemAmount)
-        nonReentrant {}
+        onlyAllowedTokens(collateralTokenAddress) 
+        sufficientBalance(msg.sender,collateralTokenAddress,requestedRedeemAmount) 
+        withinRedeemLimitSimple(msg.sender,collateralTokenAddress,requestedRedeemAmount) 
+        nonReentrant 
+        {
+            // 1st update state and send emits
+            s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] -= requestedRedeemAmount;
+            emit CollateralRedeemed(msg.sender,collateralTokenAddress,requestedRedeemAmount);
 
-    function burnDSC(uint256 requestedBurnAmount) external moreThanZero(requestedBurnAmount) {}
+            // then perform actual action to effect the state change
+            bool success = IERC20(collateralTokenAddress).transferFrom(address(this),msg.sender,requestedRedeemAmount);
+            if (!success) {
+                revert DSCEngine__TransferFailed(address(this),msg.sender,collateralTokenAddress,requestedRedeemAmount);
+            }
+        }
+
+    function burnDSC(
+        uint256 requestedBurnAmount
+        ) external 
+        moreThanZero(requestedBurnAmount) {}
 
     function liquidate() external {}
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Internal Functions *//////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    function convertToValueInUsd(
+    function convertFromTo(
+        address fromToken,
+        uint256 amount,
+        address toToken
+        ) internal view 
+        onlyAllowedTokens(fromToken) 
+        onlyAllowedTokens(toToken) 
+        returns (uint256) 
+    {
+        if (amount == 0) {
+            return 0;
+        }
+        return convertToUsd(fromToken,amount) / convertToUsd(toToken,1);
+    }
+
+    function convertFromUsd(
+        uint256 amountUsd,
+        address toToken
+        ) internal view 
+        onlyAllowedTokens(toToken) 
+        returns (uint256) 
+    {
+        if (amountUsd == 0) {
+            return 0;
+        }
+        return amountUsd / convertToUsd(toToken,1);
+    }
+
+    function convertToUsd(
         address token, 
         uint256 amount) 
         internal view onlyAllowedTokens(token) 
@@ -427,7 +498,7 @@ contract DSCEngine is ReentrancyGuard {
             uint256 depositHeld = s_userToCollateralDepositHeld[user][s_allowedCollateralTokens[i]];
             if (depositHeld > 0) {
                 // convert to USD value and add to return value
-                valueInUsd += convertToValueInUsd(s_allowedCollateralTokens[i],depositHeld);
+                valueInUsd += convertToUsd(s_allowedCollateralTokens[i],depositHeld);
             }
         }
         //return valueInUsd;    // redundant
@@ -488,8 +559,8 @@ contract DSCEngine is ReentrancyGuard {
      *  This whole section should be commented out and/or removed when testing is completed.
      */
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    function exposeconvertToValueInUsd(address token,uint256 amount) public view returns (uint256) {
-        return convertToValueInUsd(token,amount);
+    function exposeconvertToUsd(address token,uint256 amount) public view returns (uint256) {
+        return convertToUsd(token,amount);
     }
     function exposegetValueOfDepositsHeldInUsd(address user) public view returns (uint256) {
         return getValueOfDepositsHeldInUsd(user);

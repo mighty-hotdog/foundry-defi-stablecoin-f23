@@ -303,7 +303,7 @@ contract DSCEngineTest is Test {
         wbtcDepositAmount = bound(
             wbtcDepositAmount,
             0,
-            (maxDepositValueInUSD - engine.exposeconvertToValueInUsd(weth,wethDepositAmount)) / wbtcPriceInUSD);
+            (maxDepositValueInUSD - engine.exposeconvertToUsd(weth,wethDepositAmount)) / wbtcPriceInUSD);
         //  5. deposit random weth and wbtc amounts via depositCollateral()
         if (wethDepositAmount > 0) {
             ERC20Mock(weth).mint(USER,wethDepositAmount);
@@ -393,7 +393,7 @@ contract DSCEngineTest is Test {
         wbtcDepositAmount = bound(
             wbtcDepositAmount,
             0,
-            (maxDepositValueInUSD - engine.exposeconvertToValueInUsd(weth,wethDepositAmount)) / wbtcPriceInUSD);
+            (maxDepositValueInUSD - engine.exposeconvertToUsd(weth,wethDepositAmount)) / wbtcPriceInUSD);
         //  5. deposit random weth and wbtc amounts via depositCollateral()
         if (wethDepositAmount > 0) {
             ERC20Mock(weth).mint(USER,wethDepositAmount);
@@ -444,17 +444,17 @@ contract DSCEngineTest is Test {
     //function testEmitDSCMinted() external {}
 
     ////////////////////////////////////////////////////////////////////
-    // Unit tests for convertToValueInUsd()
+    // Unit tests for convertToUsd()
     ////////////////////////////////////////////////////////////////////
     function testConvertWETH(uint256 randomAmount) external view {
         randomAmount = bound(randomAmount,0,100);
         (address weth,,,,,) = config.s_activeChainConfig();
-        console.log(randomAmount," wETH is ",engine.exposeconvertToValueInUsd(weth,randomAmount),"USD");
+        console.log(randomAmount," wETH is ",engine.exposeconvertToUsd(weth,randomAmount),"USD");
     }
     function testConvertWBTC(uint256 randomAmount) external view {
         randomAmount = bound(randomAmount,0,100);
         (,address wbtc,,,,) = config.s_activeChainConfig();
-        console.log(randomAmount," wBTC is ",engine.exposeconvertToValueInUsd(wbtc,randomAmount),"USD");
+        console.log(randomAmount," wBTC is ",engine.exposeconvertToUsd(wbtc,randomAmount),"USD");
     }
     function testConvertWETHOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
         // This test performs an assertEq() comparing function return vs mock datafeed answer set in the 
@@ -462,7 +462,7 @@ contract DSCEngineTest is Test {
         //  skip if on any chain other than Anvil.
         randomAmount = bound(randomAmount,0,100);
         (address weth,,,,,) = config.s_activeChainConfig();
-        uint256 returnValue = engine.exposeconvertToValueInUsd(weth,randomAmount);
+        uint256 returnValue = engine.exposeconvertToUsd(weth,randomAmount);
         console.log(randomAmount," wETH is ",returnValue,"USD");
         assertEq(
             returnValue,
@@ -476,7 +476,7 @@ contract DSCEngineTest is Test {
         //  skip if on any chain other than Anvil.
         randomAmount = bound(randomAmount,0,100);
         (,address wbtc,,,,) = config.s_activeChainConfig();
-        uint256 returnValue = engine.exposeconvertToValueInUsd(wbtc,randomAmount);
+        uint256 returnValue = engine.exposeconvertToUsd(wbtc,randomAmount);
         console.log(randomAmount," wBTC is ",returnValue,"USD");
         assertEq(
             returnValue,
