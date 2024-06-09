@@ -40,8 +40,10 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__DataFeedError(address tokenAddress, address priceFeedAddress, int answer);
     error DSCEngine__MintFailed(address toUser,uint256 amountMinted);
     error DSCEngine__OutOfArrayRange(uint256 maxIndex,uint256 requestedIndex);
+    error DSCEngine__RequestedBurnAmountExceedsBalance(
+        address user,uint256 dscAmountHeldByUser,uint256 requestedBurnAmount);
     error DSCEngine__RequestedRedeemAmountExceedsBalance(
-        address user,address requestedRedeemCollateral,uint256 requestedRedeemAmount);
+        address user,address requestedRedeemCollateral,uint256 collateralHeldAmount,uint256 requestedRedeemAmount);
     error DSCEngine__RequestedRedeemAmountBreachesUserRedeemLimit(
         address user,address requestedRedeemCollateral,uint256 requestedRedeemAmount,uint256 maxSafeRedeemAmount);
 
@@ -81,8 +83,9 @@ contract DSCEngine is ReentrancyGuard {
     /* Events *//////////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     event CollateralDeposited(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
-    event DSCMinted(address indexed toUser,uint256 indexed amount);
     event CollateralRedeemed(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
+    event DSCMinted(address indexed toUser,uint256 indexed amount);
+    event DSCBurned(address indexed fromUser,uint256 indexed amount);
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Modifiers *///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -175,13 +178,29 @@ contract DSCEngine is ReentrancyGuard {
         _;
     }
 
-    modifier sufficientBalance(address user,address collateral,uint256 requestedRedeemAmount) {
+    modifier sufficientBalance(address user,address token,uint256 amount) {
+        if (token == i_dscToken) {
+            uint256 dscHeldByUser = s_userToDSCMintHeld[user];
+            if (amount > dscHeldByUser) {
+                revert DSCEngine__RequestedBurnAmountExceedsBalance(user,dscHeldByUser,amount);
+            }
+        } else {
+            uint256 depositHeldByUser = s_userToCollateralDepositHeld[user][token];
+            if (depositHeldByUser < amount) {
+                revert DSCEngine__RequestedRedeemAmountExceedsBalance(user,token,depositHeldByUser,amount);
+            }
+        }
+        _;
+    }
+    /*
+    modifier sufficientCollateralBalance(address user,address collateral,uint256 requestedRedeemAmount) {
         uint256 depositHeld = s_userToCollateralDepositHeld[user][collateral];
         if (depositHeld < requestedRedeemAmount) {
             revert DSCEngine__RequestedRedeemAmountExceedsBalance(user,collateral,requestedRedeemAmount);
         }
         _;
     }
+    */
 
     modifier withinRedeemLimitSimple(address user,address collateral,uint256 requestedRedeemAmount) {
         uint256 valueOfDepositsHeld = getValueOfDepositsHeldInUsd(user);
@@ -423,7 +442,17 @@ contract DSCEngine is ReentrancyGuard {
     function burnDSC(
         uint256 requestedBurnAmount
         ) external 
-        moreThanZero(requestedBurnAmount) {}
+        moreThanZero(requestedBurnAmount) 
+        sufficientBalance(msg.sender,i_dscToken,requestedBurnAmount) 
+        nonReentrant 
+    {
+        // 1st update state and send emits
+        s_userToDSCMintHeld[msg.sender] -= requestedBurnAmount;
+        emit DSCBurned(msg.sender,requestedBurnAmount);
+
+        // then perform actual action to effect the state change
+        DecentralizedStableCoin(i_dscToken).burn(requestedBurnAmount);
+    }
 
     function liquidate() external {}
 
