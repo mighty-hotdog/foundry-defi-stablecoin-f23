@@ -444,17 +444,25 @@ contract DSCEngineTest is Test {
     //function testEmitDSCMinted() external {}
 
     ////////////////////////////////////////////////////////////////////
+    // Unit tests for convertFromTo()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for convertFromUsd()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
     // Unit tests for convertToUsd()
     ////////////////////////////////////////////////////////////////////
     function testConvertWETH(uint256 randomAmount) external view {
         randomAmount = bound(randomAmount,0,100);
         (address weth,,,,,) = config.s_activeChainConfig();
-        console.log(randomAmount," wETH is ",engine.exposeconvertToUsd(weth,randomAmount),"USD");
+        console.log(randomAmount," wETH converted to ",engine.exposeconvertToUsd(weth,randomAmount)," USD");
     }
     function testConvertWBTC(uint256 randomAmount) external view {
         randomAmount = bound(randomAmount,0,100);
         (,address wbtc,,,,) = config.s_activeChainConfig();
-        console.log(randomAmount," wBTC is ",engine.exposeconvertToUsd(wbtc,randomAmount),"USD");
+        console.log(randomAmount," wBTC converted to ",engine.exposeconvertToUsd(wbtc,randomAmount)," USD");
     }
     function testConvertWETHOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
         // This test performs an assertEq() comparing function return vs mock datafeed answer set in the 
@@ -463,7 +471,7 @@ contract DSCEngineTest is Test {
         randomAmount = bound(randomAmount,0,100);
         (address weth,,,,,) = config.s_activeChainConfig();
         uint256 returnValue = engine.exposeconvertToUsd(weth,randomAmount);
-        console.log(randomAmount," wETH is ",returnValue,"USD");
+        console.log(randomAmount," wETH converted to ",returnValue," USD");
         assertEq(
             returnValue,
             vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD") * 
@@ -477,7 +485,7 @@ contract DSCEngineTest is Test {
         randomAmount = bound(randomAmount,0,100);
         (,address wbtc,,,,) = config.s_activeChainConfig();
         uint256 returnValue = engine.exposeconvertToUsd(wbtc,randomAmount);
-        console.log(randomAmount," wBTC is ",returnValue,"USD");
+        console.log(randomAmount," wBTC converted to ",returnValue," USD");
         assertEq(
             returnValue,
             vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD") * 
