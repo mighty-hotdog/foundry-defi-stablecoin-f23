@@ -54,6 +54,12 @@ contract DSCEngine is ReentrancyGuard {
         address priceFeed;
         uint256 precision;
     }
+    struct Holding {
+        address token;
+        uint256 amount;
+        uint256 currentPrice;
+        uint256 currentValueInUsd;
+    }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* State Variables - Generics *//////////////////////////////////////////////////////////////////////////////////////
@@ -117,7 +123,8 @@ contract DSCEngine is ReentrancyGuard {
     //      getDepositHeldArray(),
     //      getMintHeld()
     // Question: Is such a restriction meaningful? On blockchain user balances are already visible to everyone.
-    // Answer: Yes it is meaningful.
+    // Answer: Yes it is meaningful. Actually a full access control mechanism would be appropriate for a wallet 
+    //  app and other defi apps in general.
     // ***TODO***: Study TornadoCash design, specifically the part that protects users' privacy by using shared
     //  crypto pools to break up direct traceability to original senders/receivers.
     modifier onlyAllowedUsers() {
@@ -192,15 +199,6 @@ contract DSCEngine is ReentrancyGuard {
         }
         _;
     }
-    /*
-    modifier sufficientCollateralBalance(address user,address collateral,uint256 requestedRedeemAmount) {
-        uint256 depositHeld = s_userToCollateralDepositHeld[user][collateral];
-        if (depositHeld < requestedRedeemAmount) {
-            revert DSCEngine__RequestedRedeemAmountExceedsBalance(user,collateral,requestedRedeemAmount);
-        }
-        _;
-    }
-    */
 
     modifier withinRedeemLimitSimple(address user,address collateral,uint256 requestedRedeemAmount) {
         uint256 valueOfDepositsHeld = getValueOfDepositsHeldInUsd(user);
@@ -300,23 +298,31 @@ contract DSCEngine is ReentrancyGuard {
         //      c. orange = warning (specific items of concern highlighted)
         //      d. red = suspended (in arrears amount + specific violations highlighted)
     }
-    function getDeposits() external {
+    function getDeposits() external view returns (Holding[] memory) {
         // returns all deposits held by user, listed by:
         //      a. token
         //      b. amount
-        //      c. value in usd
+        //      c. current price
+        //      d. current value in usd
     }
-    function getDepositsValueInUsd() external {
+    function getDepositsValueInUsd() external view returns (uint256) {
         // returns total deposits value in usd held by user
+        return getValueOfDepositsHeldInUsd(msg.sender);
     }
-    function getMints() external {
+    function getMints() external view returns (uint256) {
         // returns total mint amount held by user
+        return s_userToDSCMintHeld[msg.sender];
     }
-    function getMintsValueInUsd() external {
+    function getMintsValueInUsd() external view returns (uint256) {
         // returns total mint value in usd held by user
+        return getValueOfMintsHeldInUsd(msg.sender);
     }
     function getTokensHeld() external {
-        // returns all tokens held by user
+        // returns all tokens held by user, listed by:
+        //      a. token
+        //      b. amount
+        //      c. current price
+        //      d. current value in usd
     }
     function getTokensHeldValueInUsd() external {
         // returns total tokens value in usd held by user
@@ -574,12 +580,17 @@ contract DSCEngine is ReentrancyGuard {
     function getPriceFeed(address token) external view onlyAllowedTokens(token) returns (address,uint256) {
         return (s_tokenToPriceFeed[token].priceFeed,s_tokenToPriceFeed[token].precision);
     }
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Maybe exposing these 2 functions to anyone to call is not a good idea. Users' privacy should be protected.
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     function getDepositHeld(address user,address token) external view onlyAllowedTokens(token) returns (uint256) {
         return s_userToCollateralDepositHeld[user][token];
     }
     function getMintHeld(address user) external view returns (uint256) {
         return s_userToDSCMintHeld[user];
     }
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /**
