@@ -216,9 +216,11 @@ contract DSCEngineTest is Test {
             vm.prank(USER);
             engine.depositCollateral(token,randomDepositAmount);
             // do the check
+            vm.prank(USER);
+            uint256 depositHeld = engine.getDepositAmount(token);
             assert(
                 // check that engine deposit records are correct
-                (engine.getDepositHeld(USER,token) == randomDepositAmount) &&
+                (depositHeld == randomDepositAmount) &&
                 // check that user balance is correct
                 (ERC20Mock(token).balanceOf(USER) == 0) &&
                 // check that engine balance is correct
@@ -370,8 +372,8 @@ contract DSCEngineTest is Test {
         //  10. perform the test by calling mintDSC() for random requestedMintAmount
         //  11. check that:
         //      a. expected event emitted
-        //      b. total supply of DSC minted is correct
-        //      c. minted DSC balance held by user is correct
+        //      b. minted DSC balance held by user is correct
+        //      c. total supply of DSC minted is correct
 
         // get token address for weth and wbtc for use later
         (address weth,address wbtc,,,,) = config.s_activeChainConfig();
@@ -426,17 +428,21 @@ contract DSCEngineTest is Test {
             (numerator/engine.getFractionRemovalMultiplier())-engine.exposegetValueOfMintsHeldInUsd(USER));
         //  10. perform the test by calling mintDSC() for random requestedMintAmount
         if (requestedMintAmount > 0) {
-        //  11. check that:
-        //      a. expected event emitted
+            //  11. check that:
+            //      a. expected event emitted
             vm.expectEmit(true,true,false,false,address(engine));
             emit DSCMinted(USER,requestedMintAmount);
             vm.prank(USER);
             engine.mintDSC(requestedMintAmount);
+
+            vm.prank(USER);
+            uint256 mintHeld = engine.getMints();
             assert(
-        //      b. total supply of DSC minted is correct
-                (coin.totalSupply() == valueOfMintsAlreadyHeld + requestedMintAmount) &&
-        //      c. minted DSC balance held by user is correct
-                (engine.getMintHeld(USER) == coin.totalSupply()));
+                //  b. minted DSC balance held by user is correct
+                (mintHeld == coin.totalSupply()) &&
+                //  c. total supply of DSC minted is correct
+                (coin.totalSupply() == valueOfMintsAlreadyHeld + requestedMintAmount)
+            );
         }
     }
 

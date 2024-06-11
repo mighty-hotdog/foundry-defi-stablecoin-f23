@@ -119,12 +119,7 @@ contract DSCEngine is ReentrancyGuard {
     // modifier restricts function caller to:
     //  1. app contracts serving account user
     //  2. account user
-    // Intended use is to protect user privacy in functions like:
-    //      getValueOfDepositsHeldInUsd(),
-    //      getValueOfMintsHeldInUsd(),
-    //      getDepositHeld(),
-    //      getDepositHeldArray(),
-    //      getMintHeld()
+    // Intended use is to protect user privacy in functions that retrieve user account information.
     // Question: Is such a restriction meaningful? On blockchain user balances are already visible to everyone.
     // Answer: Yes it is meaningful. Actually a full access control mechanism would be appropriate for a wallet 
     //  app and other defi apps in general.
@@ -301,7 +296,7 @@ contract DSCEngine is ReentrancyGuard {
         //      c. orange = warning (specific items of concern highlighted)
         //      d. red = suspended (in arrears amount + specific violations highlighted)
     }
-    function getDeposits() public view returns (Holding[] memory) {
+    function getAllDeposits() public view returns (Holding[] memory) {
         // returns all deposits held by user, listed by:
         //      a. token
         //      b. amount
@@ -323,6 +318,9 @@ contract DSCEngine is ReentrancyGuard {
         }
         return deposits;
     }
+    function getDepositAmount(address token) external view onlyAllowedTokens(token) returns (uint256) {
+        return s_userToCollateralDepositHeld[msg.sender][token];
+    }
     function getDepositsValueInUsd() external view returns (uint256) {
         // returns total deposits value in usd held by user
         return getValueOfDepositsHeldInUsd(msg.sender);
@@ -342,7 +340,7 @@ contract DSCEngine is ReentrancyGuard {
         //      c. amount
         //      d. current price
         //      e. current value in usd
-        Holding[] memory deposits = getDeposits();
+        Holding[] memory deposits = getAllDeposits();
         Holding[] memory holdings = new Holding[](deposits.length + 1); // + 1 to include the mint token dsc
         holdings[0] = Holding({
             token: i_dscToken,
@@ -740,13 +738,15 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // Maybe exposing these 2 functions to any external to call is not a good idea. Users' privacy should be protected.
+    // Exposing these 2 functions to externals is a bad idea. Users' privacy should be protected.
+    /*
     function getDepositHeld(address user,address token) external view onlyAllowedTokens(token) returns (uint256) {
         return s_userToCollateralDepositHeld[user][token];
     }
     function getMintHeld(address user) external view returns (uint256) {
         return s_userToDSCMintHeld[user];
     }
+    */
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
