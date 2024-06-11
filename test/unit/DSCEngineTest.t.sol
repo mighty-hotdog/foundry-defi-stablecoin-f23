@@ -322,7 +322,7 @@ contract DSCEngineTest is Test {
             vm.stopPrank();
         }
         //  6. calc numerator, ie: valueOfDepositsHeld * thresholdLimit
-        uint256 numerator = engine.exposegetValueOfDepositsHeldInUsd(USER) * engine.getThresholdLimitPercent();
+        uint256 numerator = engine.exposegetValueOfDepositsInUsd(USER) * engine.getThresholdLimitPercent();
         //  7. bound valueOfMintsAlreadyHeld by numerator / FRACTION_REMOVAL_MULTIPLIER
         valueOfMintsAlreadyHeld = bound(valueOfMintsAlreadyHeld,0,numerator/engine.getFractionRemovalMultiplier());
         //  8. mint valueOfMintsAlreadyHeld via mintDSC()
@@ -334,7 +334,7 @@ contract DSCEngineTest is Test {
         //      request is **OUTSIDE** limit
         requestedMintAmount = bound(
             requestedMintAmount,
-            (numerator/engine.getFractionRemovalMultiplier())-engine.exposegetValueOfMintsHeldInUsd(USER)+1,
+            (numerator/engine.getFractionRemovalMultiplier())-engine.exposegetValueOfDscMintsInUsd(USER)+1,
             maxDepositValueInUSD);
         //  10. perform the test by calling mintDSC() for random requestedMintAmount and checking for revert
         vm.prank(USER);
@@ -412,7 +412,7 @@ contract DSCEngineTest is Test {
             vm.stopPrank();
         }
         //  6. calc numerator, ie: valueOfDepositsHeld * thresholdLimit
-        uint256 numerator = engine.exposegetValueOfDepositsHeldInUsd(USER) * engine.getThresholdLimitPercent();
+        uint256 numerator = engine.exposegetValueOfDepositsInUsd(USER) * engine.getThresholdLimitPercent();
         //  7. bound valueOfMintsAlreadyHeld by numerator / FRACTION_REMOVAL_MULTIPLIER
         valueOfMintsAlreadyHeld = bound(valueOfMintsAlreadyHeld,0,numerator/engine.getFractionRemovalMultiplier());
         //  8. mint valueOfMintsAlreadyHeld via mintDSC()
@@ -425,7 +425,7 @@ contract DSCEngineTest is Test {
         requestedMintAmount = bound(
             requestedMintAmount,
             0,
-            (numerator/engine.getFractionRemovalMultiplier())-engine.exposegetValueOfMintsHeldInUsd(USER));
+            (numerator/engine.getFractionRemovalMultiplier())-engine.exposegetValueOfDscMintsInUsd(USER));
         //  10. perform the test by calling mintDSC() for random requestedMintAmount
         if (requestedMintAmount > 0) {
             //  11. check that:
@@ -500,7 +500,7 @@ contract DSCEngineTest is Test {
     }
 
     ////////////////////////////////////////////////////////////////////
-    // Unit tests for getValueOfDepositsHeldInUsd()
+    // Unit tests for getValueOfDepositsInUsd()
     ////////////////////////////////////////////////////////////////////
     function testValueOfDepositsIsCorrect(uint256 randomDepositAmount) external skipIfNotOnAnvil {
         // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
@@ -523,7 +523,7 @@ contract DSCEngineTest is Test {
             engine.depositCollateral(token,randomDepositAmount);
             console.log("Deposit #",i+1,": ",randomDepositAmount);
         }
-        uint256 returnValue = engine.exposegetValueOfDepositsHeldInUsd(USER);
+        uint256 returnValue = engine.exposegetValueOfDepositsInUsd(USER);
         console.log("Value of Deposits: ",returnValue,"USD");
         assertEq(
             returnValue,
@@ -539,7 +539,7 @@ contract DSCEngineTest is Test {
     }
 
     ////////////////////////////////////////////////////////////////////
-    // Unit tests for getValueOfMintsHeldInUsd()
+    // Unit tests for getValueOfDscMintsInUsd()
     ////////////////////////////////////////////////////////////////////
     function testValueOfMintsIsCorrect() external {}
 }

@@ -22,6 +22,10 @@ contract DecentralizedStableCoin is ERC20Burnable, Ownable {
     error DecentralizedStableCoin__BurnAmountExceedsBalance();
     error DecentralizedStableCoin__ReceiverAddressCannotBeZero();
 
+    /* Events */
+    event TokenBurned(address indexed fromUser,uint256 indexed amount);
+    event TokenMinted(address indexed toUser,uint256 indexed amount);
+
     /* Modifiers */
     modifier moreThanZero(uint256 amount) {
         if (amount == 0) {
@@ -43,6 +47,7 @@ contract DecentralizedStableCoin is ERC20Burnable, Ownable {
         //  ie: in this case, this keyword instructs the EVM to call the burn() function defined in the 
         //  ERC20Burnable contract.
         super.burn(_amount);
+        emit TokenBurned(msg.sender,_amount);
     }
 
     // New definition of the mint() function, as there is no mint() virtual function defined in any of 
@@ -54,6 +59,7 @@ contract DecentralizedStableCoin is ERC20Burnable, Ownable {
         // The _mint() function (non-virtual, internal) is defined in the ERC20 contract, which is 
         //  inherited by this contract as part of the ERC20Burnable contract.
         _mint(_to,_amount);
+        emit TokenMinted(_to,_amount);
         return true;
     }
 }

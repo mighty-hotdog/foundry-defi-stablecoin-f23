@@ -46,6 +46,11 @@ contract DSCEngine is ReentrancyGuard {
         address user,address requestedRedeemCollateral,uint256 collateralHeldAmount,uint256 requestedRedeemAmount);
     error DSCEngine__RequestedRedeemAmountBreachesUserRedeemLimit(
         address user,address requestedRedeemCollateral,uint256 requestedRedeemAmount,uint256 maxSafeRedeemAmount);
+    error DSCEngine__UserCannotBeZero();
+    error DSCEngine__MintsCannotBeZero();
+    error DSCEngine__DepositsCannotBeZero();
+    error DSCEngine__CannotBeLiquidated(address user);
+    error DSCEngine__UserDebtExceedsLiquidatorBalance(uint256 valueOfDscMints,uint256 liquidatorDscBalance);
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Custom Types *////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -55,7 +60,7 @@ contract DSCEngine is ReentrancyGuard {
         uint256 precision;
     }
 
-    // a Holding defines a single record of a token held by a user
+    // a Holding defines a single record of a token deposit or mint
     struct Holding {
         address token;
         bool isCollateral;
@@ -80,13 +85,15 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* State Variables - User Records & Information *////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // maps each existing user to collateral token, to the amount of deposit he currently holds in that token
+    // maps each existing user to each collateral token, to the amount of deposit he currently holds in the system 
+    //  for that token.
     // Question: Is it better here to use a mapping or an array of structs?
     mapping(address user => mapping(address collateralTokenAddress => uint256 amountOfCurrentDeposit)) 
-        private s_userToCollateralDepositHeld;
-    // maps each existing user to the amount of DSC he has minted and currently holds
+        private s_userToCollateralDeposits;
+    // maps each existing user to the amount of DSC tokens he has minted (ie: borrowed), that has not yet been burned 
+    //  (ie: returned).
     // Question: Is it better here to use a mapping or an array of structs?
-    mapping(address user => uint256 dscAmountHeld) private s_userToDSCMintHeld;
+    mapping(address user => uint256 dscAmountHeld) private s_userToDscMints;
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Events *//////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -95,6 +102,7 @@ contract DSCEngine is ReentrancyGuard {
     event CollateralRedeemed(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
     event DSCMinted(address indexed toUser,uint256 indexed amount);
     event DSCBurned(address indexed fromUser,uint256 indexed amount);
+    event Liquidated(address indexed user,uint256 indexed valueOfDscMints,uint256 indexed valueOfDeposits);
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Modifiers *///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -125,7 +133,7 @@ contract DSCEngine is ReentrancyGuard {
     //  app and other defi apps in general.
     // ***TODO***: Study TornadoCash design, specifically the part that protects users' privacy by using shared
     //  crypto pools to break up direct traceability to original senders/receivers.
-    modifier onlyAllowedUsers() {
+    modifier onlyAuthorizedUsers() {
         _;
     }
 
@@ -137,13 +145,13 @@ contract DSCEngine is ReentrancyGuard {
         //              user is within mint limits if factor > 1
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // calc/obtain total value of user's deposits //////////////////
-        uint256 valueOfDepositsHeld = getValueOfDepositsHeldInUsd(user);
+        uint256 valueOfDeposits = getValueOfDepositsInUsd(user);
         // calc/obtain total value of user's mints so far //////////////
-        uint256 valueOfMintsHeld = getValueOfMintsHeldInUsd(user);
+        uint256 valueOfDscMints = getValueOfDscMintsInUsd(user);
         // subject the 2 values to algo check //////////////////////////
         /* Algorithm:
-         *  uint256 factor = (valueOfDepositsHeld * i_thresholdLimitPercent) / 
-         *                      ((valueOfMintsHeld + requestedMintAmount) * FRACTION_REMOVAL_MULTIPLIER);
+         *  uint256 factor = (valueOfDeposits * i_thresholdLimitPercent) / 
+         *                      ((valueOfDscMints + requestedMintAmount) * FRACTION_REMOVAL_MULTIPLIER);
          *      factor > 1  ie: account is healthy
          *      factor < 1  ie: account is in arrears
          * Algorithm Description & Explanation
@@ -151,12 +159,12 @@ contract DSCEngine is ReentrancyGuard {
          *  eg: if threshold limit is 80%, then i_thresholdLimitPercent = 80
          * FRACTION_REMOVAL_MULTIPLIER is the multiplication factor needed to remove fractions.
          *  eg: if i_thresholdLimitPercent = 80, then FRACTION_REMOVAL_MULTIPLIER = 100
-         *  This is needed because threshold value of deposits held = (valueOfDepositsHeld * i_thresholdLimitPercent) / 100.
+         *  This is needed because threshold value of deposits held = (valueOfDeposits * i_thresholdLimitPercent) / 100.
          *  But to remove fractions and deal solely in integers, need to multiply by 100.
-         *  Similiarly, the denominator (valueOfMintsHeld + requestedMintAmount) also needs to be multiplied by 100.
+         *  Similiarly, the denominator (valueOfDscMints + requestedMintAmount) also needs to be multiplied by 100.
          */
-        uint256 numerator = valueOfDepositsHeld * i_thresholdLimitPercent;
-        uint256 denominator = (valueOfMintsHeld + requestedMintAmount) * FRACTION_REMOVAL_MULTIPLIER;
+        uint256 numerator = valueOfDeposits * i_thresholdLimitPercent;
+        uint256 denominator = (valueOfDscMints + requestedMintAmount) * FRACTION_REMOVAL_MULTIPLIER;
 
         // revert if mint limit breached
         if (denominator > numerator) {
@@ -166,7 +174,7 @@ contract DSCEngine is ReentrancyGuard {
             // Answer: No there isn't. By design, modifier variables are scope limited to be outside scope
             //  of the main function.
             uint256 maxSafeMintAmount = 
-                (numerator - (valueOfMintsHeld * FRACTION_REMOVAL_MULTIPLIER)) / FRACTION_REMOVAL_MULTIPLIER;
+                (numerator - (valueOfDscMints * FRACTION_REMOVAL_MULTIPLIER)) / FRACTION_REMOVAL_MULTIPLIER;
             revert DSCEngine__RequestedMintAmountBreachesUserMintLimit(user,requestedMintAmount,maxSafeMintAmount);
         }
         _;
@@ -185,32 +193,37 @@ contract DSCEngine is ReentrancyGuard {
 
     modifier sufficientBalance(address user,address token,uint256 amount) {
         if (token == i_dscToken) {
-            uint256 dscHeldByUser = s_userToDSCMintHeld[user];
-            if (amount > dscHeldByUser) {
-                revert DSCEngine__RequestedBurnAmountExceedsBalance(user,dscHeldByUser,amount);
+            uint256 dscBalance = DecentralizedStableCoin(token).balanceOf(user);
+            if (amount > dscBalance) {
+                revert DSCEngine__RequestedBurnAmountExceedsBalance(user,dscBalance,amount);
             }
         } else {
-            uint256 depositHeldByUser = s_userToCollateralDepositHeld[user][token];
-            if (depositHeldByUser < amount) {
-                revert DSCEngine__RequestedRedeemAmountExceedsBalance(user,token,depositHeldByUser,amount);
+            uint256 deposit = s_userToCollateralDeposits[user][token];
+            if (deposit < amount) {
+                revert DSCEngine__RequestedRedeemAmountExceedsBalance(user,token,deposit,amount);
             }
         }
         _;
     }
 
     modifier withinRedeemLimitSimple(address user,address collateral,uint256 requestedRedeemAmount) {
-        uint256 valueOfDepositsHeld = getValueOfDepositsHeldInUsd(user);
-        uint256 valueOfMintsHeld = getValueOfMintsHeldInUsd(user);
-        uint256 valueOfRequestedRedeemAmount = convertToUsd(collateral,requestedRedeemAmount);
-        uint256 numerator = (valueOfDepositsHeld - valueOfRequestedRedeemAmount) * i_thresholdLimitPercent;
-        uint256 denominator = valueOfMintsHeld * FRACTION_REMOVAL_MULTIPLIER;
+        uint256 valueOfDscMints = getValueOfDscMintsInUsd(user);
+        // if valueOfDscMints == 0, ie: no DSC minted, no user debt to system, hence free to redeem 
+        //  any amount even all deposits, therefore just skip all the calcs and continue w/ main 
+        //  function.
+        if (valueOfDscMints > 0) {
+            uint256 valueOfDeposits = getValueOfDepositsInUsd(user);
+            uint256 valueOfRequestedRedeemAmount = convertToUsd(collateral,requestedRedeemAmount);
+            uint256 numerator = (valueOfDeposits - valueOfRequestedRedeemAmount) * i_thresholdLimitPercent;
+            uint256 denominator = valueOfDscMints * FRACTION_REMOVAL_MULTIPLIER;
 
-        if (denominator > numerator) {
-            uint256 maxSafeRedeemAmount = 
-                ((valueOfDepositsHeld * i_thresholdLimitPercent) - denominator) / i_thresholdLimitPercent;
-            maxSafeRedeemAmount = convertFromUsd(maxSafeRedeemAmount,collateral);
-            revert DSCEngine__RequestedRedeemAmountBreachesUserRedeemLimit(
-                user,collateral,requestedRedeemAmount,maxSafeRedeemAmount);
+            if (denominator > numerator) {
+                uint256 maxSafeRedeemAmount = 
+                    ((valueOfDeposits * i_thresholdLimitPercent) - denominator) / i_thresholdLimitPercent;
+                maxSafeRedeemAmount = convertFromUsd(maxSafeRedeemAmount,collateral);
+                revert DSCEngine__RequestedRedeemAmountBreachesUserRedeemLimit(
+                    user,collateral,requestedRedeemAmount,maxSafeRedeemAmount);
+            }
         }
         _;
     }
@@ -305,7 +318,7 @@ contract DSCEngine is ReentrancyGuard {
         Holding[] memory deposits = new Holding[](s_allowedCollateralTokens.length);
         for(uint256 i=0;i<s_allowedCollateralTokens.length;i++) {
             address collateral = s_allowedCollateralTokens[i];
-            uint256 depositAmount = s_userToCollateralDepositHeld[msg.sender][collateral];
+            uint256 depositAmount = s_userToCollateralDeposits[msg.sender][collateral];
             uint256 price = convertToUsd(collateral,1);
             uint256 value = convertToUsd(collateral,depositAmount);
             deposits[i] = (Holding({
@@ -319,19 +332,19 @@ contract DSCEngine is ReentrancyGuard {
         return deposits;
     }
     function getDepositAmount(address token) external view onlyAllowedTokens(token) returns (uint256) {
-        return s_userToCollateralDepositHeld[msg.sender][token];
+        return s_userToCollateralDeposits[msg.sender][token];
     }
     function getDepositsValueInUsd() external view returns (uint256) {
         // returns total deposits value in usd held by user
-        return getValueOfDepositsHeldInUsd(msg.sender);
+        return getValueOfDepositsInUsd(msg.sender);
     }
     function getMints() external view returns (uint256) {
         // returns total mint amount held by user
-        return s_userToDSCMintHeld[msg.sender];
+        return s_userToDscMints[msg.sender];
     }
     function getMintsValueInUsd() external view returns (uint256) {
         // returns total mint value in usd held by user
-        return getValueOfMintsHeldInUsd(msg.sender);
+        return getValueOfDscMintsInUsd(msg.sender);
     }
     function getTokensHeld() external view returns (Holding[] memory) {
         // returns all tokens held by user, listed by:
@@ -345,9 +358,9 @@ contract DSCEngine is ReentrancyGuard {
         holdings[0] = Holding({
             token: i_dscToken,
             isCollateral: false,
-            amount: s_userToDSCMintHeld[msg.sender],
+            amount: s_userToDscMints[msg.sender],
             currentPrice: 1,
-            currentValueInUsd: getValueOfMintsHeldInUsd(msg.sender)
+            currentValueInUsd: getValueOfDscMintsInUsd(msg.sender)
         });
         for(uint256 i=1;i<holdings.length;++i) {
             holdings[i] = deposits[i-1];
@@ -356,7 +369,7 @@ contract DSCEngine is ReentrancyGuard {
     }
     function getTokensHeldValueInUsd() external view returns (uint256) {
         // returns total tokens value in usd held by user
-        return getValueOfDepositsHeldInUsd(msg.sender) + getValueOfMintsHeldInUsd(msg.sender);
+        return getValueOfDepositsInUsd(msg.sender) + getValueOfDscMintsInUsd(msg.sender);
     }
 
     // these approval user functions are questionable in usefulness, since the only appropriate
@@ -383,7 +396,7 @@ contract DSCEngine is ReentrancyGuard {
      *  @param  depositAmount  amount of collateral to deposit
      *  @param  mintAmount amount of DSC token to be requested for mint
      *  @dev    all needed checks alrdy implemented in the constituent functions.
-     *          user is msg.sender.
+     *  @dev    user is msg.sender.
      */
     function depositCollateralMintDSC(
         address collateral,
@@ -420,7 +433,7 @@ contract DSCEngine is ReentrancyGuard {
         nonReentrant 
     {
         // 1st update state and send emits,
-        s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] += requestedDepositAmount;
+        s_userToCollateralDeposits[msg.sender][collateralTokenAddress] += requestedDepositAmount;
         emit CollateralDeposited(msg.sender,collateralTokenAddress,requestedDepositAmount);
 
         // then perform actual action to effect the state change.
@@ -474,7 +487,7 @@ contract DSCEngine is ReentrancyGuard {
         nonReentrant
     {
         // 1st update state and send emits
-        s_userToDSCMintHeld[msg.sender] += requestedMintAmount;
+        s_userToDscMints[msg.sender] += requestedMintAmount;
         emit DSCMinted(msg.sender,requestedMintAmount);
 
         // then perform actual action to effect the state change
@@ -484,81 +497,157 @@ contract DSCEngine is ReentrancyGuard {
         }
     }
 
-    function redeemCollateralBurnDSC() external {}
+    /**
+     *  @notice redeemCollateralBurnDSC()
+     *          for any user to call.
+     *          convenience function combining _burnDSC() and _redeemCollateral() in single call to save gas.
+     *  @param  requestedBurnAmount DSC amount to burn
+     *  @param  collateralTokenAddress  collateral to redeem
+     *  @param  requestedRedeemAmount amount to redeem
+     *  @dev    all needed checks alrdy implemented in the constituent functions.
+     *  @dev    user is msg.sender.
+     */
+    function redeemCollateralBurnDSC(
+        uint256 requestedBurnAmount,
+        address collateralTokenAddress,
+        uint256 requestedRedeemAmount
+        ) external 
+    {
+        _burnDSC(msg.sender,msg.sender,requestedBurnAmount);
+        _redeemCollateral(msg.sender,msg.sender,collateralTokenAddress,requestedRedeemAmount);
+    }
 
     /**
      *  @notice redeemCollateral()
      *          for any user to call, to redeem collaterals held in his own account
      *  @param  collateralTokenAddress  collateral token contract address
      *  @param  requestedRedeemAmount  amount of collateral to requested for redemption
-     *  @dev    checks performed:
+     *  @dev    all checks are performed in the constituent function _redeemCollateral():
      *              1. redeem amount is more than zero
      *              2. redemption is in allowed tokens
      *              3. sufficient balance exists in collateral held
      *              4. user's redeem limit is not breached with this redemption request
-     *          if all checks passed, then proceed to:
+     *          all implementation logic in constituent function _redeemCollateral():
      *              1. record redemption (ie: change internal state)
      *              2. emit event
      *              3. perform the actual token transfer
      *  @dev    user is msg.sender.
      */
-    function redeemCollateral(
-        address collateralTokenAddress,
-        uint256 requestedRedeemAmount
-        ) public 
-        moreThanZero(requestedRedeemAmount) 
-        onlyAllowedTokens(collateralTokenAddress) 
-        sufficientBalance(msg.sender,collateralTokenAddress,requestedRedeemAmount) 
-        withinRedeemLimitSimple(msg.sender,collateralTokenAddress,requestedRedeemAmount) 
-        nonReentrant 
-    {
-        // 1st update state and send emits
-        s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] -= requestedRedeemAmount;
-        emit CollateralRedeemed(msg.sender,collateralTokenAddress,requestedRedeemAmount);
-
-        // then perform actual action to effect the state change
-        bool success = IERC20(collateralTokenAddress).transferFrom(address(this),msg.sender,requestedRedeemAmount);
-        if (!success) {
-            revert DSCEngine__TransferFailed(address(this),msg.sender,collateralTokenAddress,requestedRedeemAmount);
-        }
+    function redeemCollateral(address collateralTokenAddress,uint256 requestedRedeemAmount) external {
+        _redeemCollateral(msg.sender,msg.sender,collateralTokenAddress,requestedRedeemAmount);
     }
 
     /**
      *  @notice burnDSC()
      *          for any user to call, to burn minted dsc tokens held in his own account
      *  @param  requestedBurnAmount  amount of dsc tokens to burn
-     *  @dev    checks performed:
+     *  @dev    all checks are performed in the constituent function _burnDSC():
      *              1. burn amount is more than zero
-     *              2. sufficient balance exists in minted dsc held
-     *          if all checks passed, then proceed to:
-     *              1. record burn (ie: change internal state)
+     *              2. sufficient balance exists in user account
+     *          all implementation logic in constituent function _burnDSC():
+     *              1. record burn (ie: pay down user debt)
      *              2. emit event
-     *              3. perform the token transfer from user to DSCEngine
+     *              3. perform the token transfer from user balance to DSCEngine
      *              4. DSCEngine performs the actual burn
      *  @dev    user is msg.sender.
      */
-    function burnDSC(
-        uint256 requestedBurnAmount
-        ) public 
-        moreThanZero(requestedBurnAmount) 
-        sufficientBalance(msg.sender,i_dscToken,requestedBurnAmount) 
-        nonReentrant 
-    {
-        // 1st update state and send emits
-        s_userToDSCMintHeld[msg.sender] -= requestedBurnAmount;
-        emit DSCBurned(msg.sender,requestedBurnAmount);
-
-        // then perform actual action to effect the state change
-        // 1st transfer DSC to be burned from user to engine
-        bool success = IERC20(i_dscToken).transferFrom(msg.sender,address(this),requestedBurnAmount);
-        if (!success) {
-            revert DSCEngine__TransferFailed(msg.sender,address(this),i_dscToken,requestedBurnAmount);
-        }
-        // then have the engine burn the DSC
-        DecentralizedStableCoin(i_dscToken).burn(requestedBurnAmount);
+    function burnDSC(uint256 requestedBurnAmount) external {
+        _burnDSC(msg.sender,msg.sender,requestedBurnAmount);
     }
 
-    function liquidate() external {}
+    function liquidate(address userToLiquidate) external nonReentrant {
+        // Question: What is liquidation?
+        // Answer: Paying off a user's debt (minted dsc tokens in this case) and receiving the value of 
+        //  his deposits backing that debt.
+        // Question: Who can liquidate?
+        // Answer: Other users in the system.
+        // Question: Under what circumstances will they "pull the trigger" to liquidate?
+        // Answer: When they profit from it. Taking a simplistic approach:
+        //  liquidators watch for the "right" moment to pull the trigger, which is when the value of a 
+        //  user's collaterals fall below the required system threshold limit, but is still well above 
+        //  the value of his debt which they are backing.
+        //  Upon triggering the liquidation, the liquidator pays a lower value (the debt) in return for 
+        //  a higher value (the collaterals, which the liquidator receive directly and in full from the 
+        //  liquidation event).
+        // Question: So how does this whole liquidation play out?
+        // Answer: 
+        //  A deposits $8000 ETH (at $4000/ETH) and mints $4000 DSC.
+        //      A collateral deposits: $8000 (2 ETH tokens)
+        //      A debt: $4000 (ie: minted 4000 DSC)
+        //      A DSC tokens held: 4000
+        //      A ETH tokens held: 0
+        //      A total balance: $8000
+        //  Price of ETH plunges to $3000. A's collateral is now worth $6000.
+        //      A collateral: $6000 (still 2 ETH tokens)
+        //      A debt: $4000
+        //      A DSC tokens held: 4000
+        //      A ETH tokens held: 0
+        //      A total balance: $6000
+        //  System collateralization requirement is 200%. This means A is now undercollateralized and can be liquidated.
+        //  B steps in to liquidate A.
+        //  B deposits $8000 ETH (at $3000/ETH) and mints $4000 DSC.
+        //      B collateral deposits: $8000 (2.67 ETH tokens)
+        //      B debt: $4000 (ie: minted 4000 DSC)
+        //      B DSC tokens held: 4000
+        //      B ETH tokens held: 0
+        //      B total balance: $8000
+        //  B liquidates A by paying A's debt with B's own DSC tokens, then redeems A's collaterals.
+        //      A collateral: $0            B collateral: $8000 (still 2.67 ETH tokens)
+        //      A debt: $0                  B debt: $4000
+        //      A DSC tokens held: 4000     B DSC tokens held: 0
+        //      A ETH tokens held: 0        B ETH tokens held: 2 (at $3000/ETH)
+        //      A total balance: $4000      B total balance: $10,000
+        //  
+        //  checks performed:
+        //      1. user to liquidate has non-zero deposits and mints
+        //      2. user to liquidate is below required threshold limit for deposits vs mints balance
+        //      3. liquidator has sufficient balance (ie: dsc tokens) to pay for full liquidation amount
+        //  if all checks passed, carry out the liquidation:
+        //      1. liquidator
+        //          a. burns DSC tokens
+        //          b. redeems collateral tokens
+        //      2. liquidated user
+        //          a. debt (ie: DSC mints) is zeroed
+        //          b. collateral deposits is also zeroed
+        
+        // all checks //////////////////////////////////////////////////////////////
+        if (userToLiquidate == address(0)) {
+            revert DSCEngine__UserCannotBeZero();
+        }
+        uint256 valueOfDscMints = getValueOfDscMintsInUsd(userToLiquidate);
+        if (valueOfDscMints == 0) {
+            revert DSCEngine__MintsCannotBeZero();
+        }
+        uint256 valueOfDeposits = getValueOfDepositsInUsd(userToLiquidate);
+        if (valueOfDeposits == 0) {
+            revert DSCEngine__DepositsCannotBeZero();
+        }
+        uint256 liquidatorDscBalance = DecentralizedStableCoin(i_dscToken).balanceOf(msg.sender);
+        if (liquidatorDscBalance < valueOfDscMints) {
+            revert DSCEngine__UserDebtExceedsLiquidatorBalance(valueOfDscMints,liquidatorDscBalance);
+        }
+        uint256 numerator = valueOfDeposits * i_thresholdLimitPercent;
+        uint256 denominator = valueOfDscMints * FRACTION_REMOVAL_MULTIPLIER;
+        if (denominator >= numerator) {
+            revert DSCEngine__CannotBeLiquidated(userToLiquidate);
+        }
+
+        // liquidated user debt zeroed /////////////////////////////////////////////
+        s_userToDscMints[userToLiquidate] = 0;
+        for(uint256 i=0;i<s_allowedCollateralTokens.length;++i) {
+            // liquidator redeems all collaterals //////////////////////////////////
+            _redeemCollateral(
+                userToLiquidate,
+                msg.sender,
+                s_allowedCollateralTokens[i],
+                s_userToCollateralDeposits[userToLiquidate][s_allowedCollateralTokens[i]]);
+            // in parallel, liquidated user collateral deposits zeroed /////////////
+            delete s_userToCollateralDeposits[userToLiquidate][s_allowedCollateralTokens[i]];
+        }
+        emit Liquidated(userToLiquidate,valueOfDscMints,valueOfDeposits);
+        // liquidator burns DSC tokens /////////////////////////////////////////////
+        _burnDSC(msg.sender,userToLiquidate,valueOfDscMints);
+    }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Internal Functions *//////////////////////////////////////////////////////////////////////////////////////////////
@@ -659,7 +748,7 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     /**
-     *  @notice getValueOfDepositsHeldInUsd()
+     *  @notice getValueOfDepositsInUsd()
      *          utility function for retrieving the total value in USD of all deposits held by a given user.
      *          to protect the privacy of the user, this function is internal and view only.
      *  @dev    note that the output rounds off to the nearest dollar, ie: all decimals are truncated off.
@@ -667,12 +756,12 @@ contract DSCEngine is ReentrancyGuard {
      *              this output should not be stored for later use as it may become stale but should
      *              be requested afresh when needed.
      */
-    function getValueOfDepositsHeldInUsd(address user) internal view returns (uint256 valueInUsd) 
+    function getValueOfDepositsInUsd(address user) internal view returns (uint256 valueInUsd) 
     {
         // loop through all allowed collateral tokens
         for(uint256 i=0;i<s_allowedCollateralTokens.length;i++) {
             // obtain deposit amount held by user in each collateral token
-            uint256 depositHeld = s_userToCollateralDepositHeld[user][s_allowedCollateralTokens[i]];
+            uint256 depositHeld = s_userToCollateralDeposits[user][s_allowedCollateralTokens[i]];
             if (depositHeld > 0) {
                 // convert to USD value and add to return value
                 valueInUsd += convertToUsd(s_allowedCollateralTokens[i],depositHeld);
@@ -682,16 +771,95 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     /**
-     *  @notice getValueOfMintsHeldInUsd()
+     *  @notice getValueOfDscMintsInUsd()
      *          utility function for retrieving the total value in USD of all minted DSC tokens held by a 
      *              given user.
      *          to protect the privacy of the user, this function is internal and view only.
      *          since DSC token is pegged 1:1 to USD, so the output is basically the amount of minted DSC 
      *              held by the user.
      */
-    function getValueOfMintsHeldInUsd(address user) internal view returns (uint256 valueInUsd) {
+    function getValueOfDscMintsInUsd(address user) internal view returns (uint256 valueInUsd) {
         // since DSC token is USD-pegged 1:1, no extra logic needed to convert DSC token amount to its equivalent USD value
-        return s_userToDSCMintHeld[user];
+        return s_userToDscMints[user];
+    }
+
+    /**
+     *  @notice _redeemCollateral()
+     *          a more generic redeem function, only for internal authorized callers
+     *  @param  from    account from which deposited collateral is to be redeemed
+     *  @param  to      account to which the redeemed collateral tokens are transferred to
+     *  @param  collateralTokenAddress  collateral token contract address
+     *  @param  requestedRedeemAmount  amount of collateral to requested for redemption
+     *  @dev    checks performed:
+     *              1. redeem amount is more than zero
+     *              2. redemption is in allowed tokens
+     *              3. sufficient balance exists in from user's collateral deposits
+     *              4. from user's redeem limit is not breached with this redemption request
+     *          if all checks passed, then proceed to:
+     *              1. record redemption (ie: change internal state)
+     *              2. emit event
+     *              3. perform the actual token transfer
+     */
+    function _redeemCollateral(
+        address from,
+        address to,
+        address collateralTokenAddress,
+        uint256 requestedRedeemAmount
+        ) internal 
+        moreThanZero(requestedRedeemAmount) 
+        onlyAllowedTokens(collateralTokenAddress) 
+        sufficientBalance(from,collateralTokenAddress,requestedRedeemAmount) 
+        withinRedeemLimitSimple(from,collateralTokenAddress,requestedRedeemAmount) 
+        nonReentrant 
+    {
+        // 1st update state and send emits
+        s_userToCollateralDeposits[from][collateralTokenAddress] -= requestedRedeemAmount;
+        emit CollateralRedeemed(from,collateralTokenAddress,requestedRedeemAmount);
+
+        // then perform actual action to effect the state change
+        bool success = IERC20(collateralTokenAddress).transferFrom(address(this),to,requestedRedeemAmount);
+        if (!success) {
+            revert DSCEngine__TransferFailed(address(this),to,collateralTokenAddress,requestedRedeemAmount);
+        }
+    }
+
+    /**
+     *  @notice _burnDSC()
+     *          a more generic burn function, only for internal authorized callers
+     *  @param  dscFrom account from where the DSC tokens to be burned will be transferred from
+     *  @param  onBehalfOf  account on whose behalf the DSC tokens will be burned
+     *                      ie: the account whose debt will be paid down.
+     *  @param  requestedBurnAmount  amount of dsc tokens to burn
+     *  @dev    checks performed:
+     *              1. burn amount is more than zero
+     *              2. sufficient balance exists in dscFrom account
+     *          if all checks passed, then proceed to:
+     *              1. record burn (ie: change internal state)
+     *              2. emit event
+     *              3. perform the token transfer from user to DSCEngine
+     *              4. DSCEngine performs the actual burn
+     */
+    function _burnDSC(
+        address dscFrom,
+        address onBehalfOf,
+        uint256 requestedBurnAmount
+        ) internal 
+        moreThanZero(requestedBurnAmount) 
+        sufficientBalance(dscFrom,i_dscToken,requestedBurnAmount) 
+        nonReentrant 
+    {
+        // 1st update state and send emits
+        s_userToDscMints[onBehalfOf] -= requestedBurnAmount;
+        emit DSCBurned(onBehalfOf,requestedBurnAmount);
+
+        // then perform actual action to effect the state change
+        // 1st transfer DSC to be burned from user to engine
+        bool success = IERC20(i_dscToken).transferFrom(dscFrom,address(this),requestedBurnAmount);
+        if (!success) {
+            revert DSCEngine__TransferFailed(dscFrom,address(this),i_dscToken,requestedBurnAmount);
+        }
+        // then have the engine burn the DSC
+        DecentralizedStableCoin(i_dscToken).burn(requestedBurnAmount);
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -741,10 +909,10 @@ contract DSCEngine is ReentrancyGuard {
     // Exposing these 2 functions to externals is a bad idea. Users' privacy should be protected.
     /*
     function getDepositHeld(address user,address token) external view onlyAllowedTokens(token) returns (uint256) {
-        return s_userToCollateralDepositHeld[user][token];
+        return s_userToCollateralDeposits[user][token];
     }
     function getMintHeld(address user) external view returns (uint256) {
-        return s_userToDSCMintHeld[user];
+        return s_userToDscMints[user];
     }
     */
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -759,10 +927,10 @@ contract DSCEngine is ReentrancyGuard {
     function exposeconvertToUsd(address token,uint256 amount) public view returns (uint256) {
         return convertToUsd(token,amount);
     }
-    function exposegetValueOfDepositsHeldInUsd(address user) public view returns (uint256) {
-        return getValueOfDepositsHeldInUsd(user);
+    function exposegetValueOfDepositsInUsd(address user) public view returns (uint256) {
+        return getValueOfDepositsInUsd(user);
     }
-    function exposegetValueOfMintsHeldInUsd(address user) public view returns (uint256) {
-        return getValueOfMintsHeldInUsd(user);
+    function exposegetValueOfDscMintsInUsd(address user) public view returns (uint256) {
+        return getValueOfDscMintsInUsd(user);
     }
 }
