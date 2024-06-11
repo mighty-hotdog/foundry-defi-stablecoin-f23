@@ -74,5 +74,5 @@ Fuzz Testing in Foundry:
                                                     invariant test is called after each 
                                                     handler function call.
 
-Oracles Management  -> check oracle feed replies for staleness every time they are requested,
-                        based on refresh rates defined by the oracles themselves.
+Oracles Management: check oracle feed replies for staleness every time they are requested,
+based on refresh rates defined by the oracles themselves.
