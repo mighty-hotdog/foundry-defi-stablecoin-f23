@@ -457,6 +457,12 @@ contract DSCEngine is ReentrancyGuard {
         emit DSCBurned(msg.sender,requestedBurnAmount);
 
         // then perform actual action to effect the state change
+        // 1st transfer DSC to be burned from user to engine
+        bool success = IERC20(i_dscToken).transferFrom(msg.sender,address(this),requestedBurnAmount);
+        if (!success) {
+            revert DSCEngine__TransferFailed(msg.sender,address(this),i_dscToken,requestedBurnAmount);
+        }
+        // then have the engine burn the DSC
         DecentralizedStableCoin(i_dscToken).burn(requestedBurnAmount);
     }
 

@@ -28,3 +28,51 @@ TODOs
 3. ~write unit/integration tests for DSCEngine~ DONE
 4. complete implementation for DSCEngine
 5. complete tests for DSCEngine
+
+Cyfrin Updraft explores advanced fuzz-testing and oracles management in the last part 
+of this course.
+
+Fuzz Testing in Foundry:
+1. Stateless fuzz testing   -> randomized input parameters to test functions.
+                            -> Foundry tester goes thru each test contract/script and 
+                                for each defined test function, runs setUp() and then 
+                                that test function, separately on its own, just like
+                                in previous project's unit tests.
+2. Stateful fuzz testing aka Invariant testing  -> identify/define system invariants & 
+                                                    implement them in invariant_xxx() 
+                                                    tests.
+                                                -> configure "runs", "depth" and 
+                                                    "fail-on-revert".
+                                                -> set targets for invariant testing:
+                                                        - target contracts
+                                                        - target senders
+                                                        - target interfaces
+                                                        - target selectors
+                                                        - target artifacts
+                                                        - target artifact selectors
+                                                -> in Open-testing, set the unit tests 
+                                                    contracts/scripts as the target 
+                                                    contracts. Foundry tester goes thru
+                                                    each target contract, and based on 
+                                                    configuration, chain-calls the test
+                                                    functions in random sequences, with
+                                                    state persisted across function calls
+                                                    during each run.
+                                                -> in Handler-based testing, define handler
+                                                    contracts/scripts and set these as 
+                                                    the target contracts. In these handler
+                                                    contracts, define handler test functions
+                                                    that include all prerequisites needed 
+                                                    for the actual unit test functions not
+                                                    to revert, as well as the calling of 
+                                                    these test functions themselves. 
+                                                    Foundry tester goes thru each target 
+                                                    handler contract, and based on config,
+                                                    calls These handler functions in random 
+                                                    sequence during each "run", with state 
+                                                    persisted across function calls. Every 
+                                                    invariant test is called after each 
+                                                    handler function call.
+
+Oracles Management  -> check oracle feed replies for staleness every time they are requested,
+                        based on refresh rates defined by the oracles themselves.
