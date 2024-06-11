@@ -54,8 +54,11 @@ contract DSCEngine is ReentrancyGuard {
         address priceFeed;
         uint256 precision;
     }
+
+    // a Holding defines a single record of a token held by a user
     struct Holding {
         address token;
+        bool isCollateral;
         uint256 amount;
         uint256 currentPrice;
         uint256 currentValueInUsd;
@@ -268,23 +271,23 @@ contract DSCEngine is ReentrancyGuard {
      *  Each function is meant to be called directly by the user.
      *  As such, they all make use of msg.sender to activate whatever feature/functionality they implement/provide.
      */
-    function getAccountHealthInfo() external {
+    function getAccountFullInfo() external {
         // returns:
         //  1. user account status:
         //      a. green = healthy
         //      b. yellow = concern (specific items of concern highlighted)
         //      c. orange = warning (specific items of concern highlighted)
         //      d. red = suspended (in arrears amount + specific violations highlighted)
-        //  2. all deposits held by user, listed by:
+        //  2. all tokens held by user, listed by:
         //      a. token
-        //      b. amount
-        //      c. value in usd
-        //  3. total deposits value in usd held by user
-        //  4. total mint amount held by user
-        //  5. total mint value in usd held by user
-        //  6. all tokens held by user
-        //  7. total tokens value in usd held by user
-        //  8. all still-in-effect approvals/delegates granted by user, listed by:
+        //      b. is token a collateral
+        //      c. amount
+        //      d. current price
+        //      e. current value in usd
+        //  3. total tokens value in usd held by user
+        //  4. total deposits value in usd held by user
+        //  5. total mints value in usd held by user
+        //  6. all still-in-effect approvals/delegates granted by user, listed by:
         //      a. status (in-effect,depleted,cancelled)
         //      b. spender
         //      c. original amount approved
@@ -298,12 +301,27 @@ contract DSCEngine is ReentrancyGuard {
         //      c. orange = warning (specific items of concern highlighted)
         //      d. red = suspended (in arrears amount + specific violations highlighted)
     }
-    function getDeposits() external view returns (Holding[] memory) {
+    function getDeposits() public view returns (Holding[] memory) {
         // returns all deposits held by user, listed by:
         //      a. token
         //      b. amount
         //      c. current price
         //      d. current value in usd
+        Holding[] memory deposits = new Holding[](s_allowedCollateralTokens.length);
+        for(uint256 i=0;i<s_allowedCollateralTokens.length;i++) {
+            address collateral = s_allowedCollateralTokens[i];
+            uint256 depositAmount = s_userToCollateralDepositHeld[msg.sender][collateral];
+            uint256 price = convertToUsd(collateral,1);
+            uint256 value = convertToUsd(collateral,depositAmount);
+            deposits[i] = (Holding({
+                token: collateral,
+                isCollateral: true,
+                amount: depositAmount,
+                currentPrice: price,
+                currentValueInUsd: value
+            }));
+        }
+        return deposits;
     }
     function getDepositsValueInUsd() external view returns (uint256) {
         // returns total deposits value in usd held by user
@@ -317,16 +335,36 @@ contract DSCEngine is ReentrancyGuard {
         // returns total mint value in usd held by user
         return getValueOfMintsHeldInUsd(msg.sender);
     }
-    function getTokensHeld() external {
+    function getTokensHeld() external view returns (Holding[] memory) {
         // returns all tokens held by user, listed by:
         //      a. token
-        //      b. amount
-        //      c. current price
-        //      d. current value in usd
+        //      b. is this a collateral
+        //      c. amount
+        //      d. current price
+        //      e. current value in usd
+        Holding[] memory deposits = getDeposits();
+        Holding[] memory holdings = new Holding[](deposits.length + 1); // + 1 to include the mint token dsc
+        holdings[0] = Holding({
+            token: i_dscToken,
+            isCollateral: false,
+            amount: s_userToDSCMintHeld[msg.sender],
+            currentPrice: 1,
+            currentValueInUsd: getValueOfMintsHeldInUsd(msg.sender)
+        });
+        for(uint256 i=1;i<holdings.length;++i) {
+            holdings[i] = deposits[i-1];
+        }
+        return holdings;
     }
-    function getTokensHeldValueInUsd() external {
+    function getTokensHeldValueInUsd() external view returns (uint256) {
         // returns total tokens value in usd held by user
+        return getValueOfDepositsHeldInUsd(msg.sender) + getValueOfMintsHeldInUsd(msg.sender);
     }
+
+    // these approval user functions are questionable in usefulness, since the only appropriate
+    //  spender in here is the DSCEngine. In any case, ERC20 and its associated interfaces do
+    //  not seem to allow approval/spender/allowance records to be retrieved.
+    /*
     function getApprovals() external {
         // returns all still-in-effect approvals/delegates granted by user, listed by:
         //      a. status (in-effect,depleted,cancelled)
@@ -337,25 +375,48 @@ contract DSCEngine is ReentrancyGuard {
     }
     function cancelApproval() external {}
     function grantApproval() external {}
-    function depositCollateralMintDSC() external {}
+    */
+
+    /**
+     *  @notice depositCollateralMintDSC()
+     *          for any user to call.
+     *          convenience function combining depositCollateral() and mintDSC() in single call to save gas.
+     *  @param  collateral  collateral token contract address
+     *  @param  depositAmount  amount of collateral to deposit
+     *  @param  mintAmount amount of DSC token to be requested for mint
+     *  @dev    all needed checks alrdy implemented in the constituent functions.
+     *          user is msg.sender.
+     */
+    function depositCollateralMintDSC(
+        address collateral,
+        uint256 depositAmount,
+        uint256 mintAmount
+        ) external 
+    {
+        depositCollateral(collateral, depositAmount);
+        mintDSC(mintAmount);
+    }
 
     /**
      *  @notice depositCollateral()
      *          for any user to call, to deposit collaterals into his own account
+     *          also called in convenience function depositCollateralMintDSC() in combination with mintDSC().
      *  @param  collateralTokenAddress  collateral token contract address
      *  @param  requestedDepositAmount  amount of collateral to deposit
      *  @dev    checks performed:
      *              1. deposit is in allowed tokens
      *              2. deposit amount is more than zero
-     *          if both checks passed, then proceed to:
+     *          if all checks passed, then proceed to:
      *              1. record deposit (ie: change internal state)
      *              2. emit event
      *              3. perform the actual token transfer
+     *  @dev    user is msg.sender.
+     *  @dev    public, to allow depositCollateralMintDSC() to call.
      */
     function depositCollateral(
         address collateralTokenAddress,
         uint256 requestedDepositAmount
-        ) external 
+        ) public 
         moreThanZero(requestedDepositAmount) 
         onlyAllowedTokens(collateralTokenAddress) 
         nonReentrant 
@@ -394,19 +455,22 @@ contract DSCEngine is ReentrancyGuard {
 
     /**
      *  @notice mintDSC()
-     *          for a user to call, to mint DSC on his own account
+     *          for a user to call, to mint DSC on his own account.
+     *          also called in convenience function depositCollateralMintDSC() in combination with depositCollateral().
      *  @param  requestedMintAmount amount of DSC token to be requested for mint
      *  @dev    checks performed:
      *              1. mint amount is more than zero
-     *              2. msg.sender's mint limit is not been breached while taking into consideration the requested mint amount
-     *          if both checks passed, then proceed:
+     *              2. user's mint limit is not been breached with this mint request
+     *          if all checks passed, then proceed:
      *              1. record mint (ie: change internal state)
      *              2. emit event
-     *              3. perform actual mint/token transfer
+     *              3. perform actual mint and token transfer
+     *  @dev    user is msg.sender.
+     *  @dev    public, to allow depositCollateralMintDSC() to call.
      */
     function mintDSC(
         uint256 requestedMintAmount
-        ) external 
+        ) public 
         moreThanZero(requestedMintAmount) 
         withinMintLimitSimple(msg.sender,requestedMintAmount) 
         nonReentrant
@@ -424,30 +488,60 @@ contract DSCEngine is ReentrancyGuard {
 
     function redeemCollateralBurnDSC() external {}
 
+    /**
+     *  @notice redeemCollateral()
+     *          for any user to call, to redeem collaterals held in his own account
+     *  @param  collateralTokenAddress  collateral token contract address
+     *  @param  requestedRedeemAmount  amount of collateral to requested for redemption
+     *  @dev    checks performed:
+     *              1. redeem amount is more than zero
+     *              2. redemption is in allowed tokens
+     *              3. sufficient balance exists in collateral held
+     *              4. user's redeem limit is not breached with this redemption request
+     *          if all checks passed, then proceed to:
+     *              1. record redemption (ie: change internal state)
+     *              2. emit event
+     *              3. perform the actual token transfer
+     *  @dev    user is msg.sender.
+     */
     function redeemCollateral(
         address collateralTokenAddress,
         uint256 requestedRedeemAmount
-        ) external 
+        ) public 
         moreThanZero(requestedRedeemAmount) 
         onlyAllowedTokens(collateralTokenAddress) 
         sufficientBalance(msg.sender,collateralTokenAddress,requestedRedeemAmount) 
         withinRedeemLimitSimple(msg.sender,collateralTokenAddress,requestedRedeemAmount) 
         nonReentrant 
-        {
-            // 1st update state and send emits
-            s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] -= requestedRedeemAmount;
-            emit CollateralRedeemed(msg.sender,collateralTokenAddress,requestedRedeemAmount);
+    {
+        // 1st update state and send emits
+        s_userToCollateralDepositHeld[msg.sender][collateralTokenAddress] -= requestedRedeemAmount;
+        emit CollateralRedeemed(msg.sender,collateralTokenAddress,requestedRedeemAmount);
 
-            // then perform actual action to effect the state change
-            bool success = IERC20(collateralTokenAddress).transferFrom(address(this),msg.sender,requestedRedeemAmount);
-            if (!success) {
-                revert DSCEngine__TransferFailed(address(this),msg.sender,collateralTokenAddress,requestedRedeemAmount);
-            }
+        // then perform actual action to effect the state change
+        bool success = IERC20(collateralTokenAddress).transferFrom(address(this),msg.sender,requestedRedeemAmount);
+        if (!success) {
+            revert DSCEngine__TransferFailed(address(this),msg.sender,collateralTokenAddress,requestedRedeemAmount);
         }
+    }
 
+    /**
+     *  @notice burnDSC()
+     *          for any user to call, to burn minted dsc tokens held in his own account
+     *  @param  requestedBurnAmount  amount of dsc tokens to burn
+     *  @dev    checks performed:
+     *              1. burn amount is more than zero
+     *              2. sufficient balance exists in minted dsc held
+     *          if all checks passed, then proceed to:
+     *              1. record burn (ie: change internal state)
+     *              2. emit event
+     *              3. perform the token transfer from user to DSCEngine
+     *              4. DSCEngine performs the actual burn
+     *  @dev    user is msg.sender.
+     */
     function burnDSC(
         uint256 requestedBurnAmount
-        ) external 
+        ) public 
         moreThanZero(requestedBurnAmount) 
         sufficientBalance(msg.sender,i_dscToken,requestedBurnAmount) 
         nonReentrant 
@@ -471,6 +565,20 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Internal Functions *//////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    /**
+     *  @notice convertFromTo()
+     *          utility function for converting from 1 token to another
+     *          this function will not accept dsc token. Conversion to/from dsc token is equivalent
+     *              to conversion to/from USD since dsc is pegged 1:1 to USD. The 2 functions
+     *              convertToUsd() and convertFromUsd() may be used instead.
+     *  @dev    note that the output rounds off to the nearest unit, ie: all decimals are truncated off.
+     *          note also that this conversion is based on prices retrieved at the time of this call.
+     *              this output should not be stored for later use as it may become stale but should
+     *              be requested afresh when needed.
+     *  @dev    note that this function will not accept dsc token. Conversion to/from dsc token is equivalent
+     *              to conversion to/from USD since dsc is pegged 1:1 to USD.
+     */
     function convertFromTo(
         address fromToken,
         uint256 amount,
@@ -486,6 +594,17 @@ contract DSCEngine is ReentrancyGuard {
         return convertToUsd(fromToken,amount) / convertToUsd(toToken,1);
     }
 
+    /**
+     *  @notice convertFromUsd()
+     *          utility function for converting from USD to the specified token,
+     *              ie: how much of the token can the given amount of USD buy
+     *          this function will not accept dsc token, nor is it necessary since dsc is pegged
+     *              1:1 to USD, ie: 1 USD buys 1 DSC.
+     *  @dev    note that the output rounds off to the nearest unit, ie: all decimals are truncated off.
+     *          note also that this conversion is based on prices retrieved at the time of this call.
+     *              this output should not be stored for later use as it may become stale but should
+     *              be requested afresh when needed.
+     */
     function convertFromUsd(
         uint256 amountUsd,
         address toToken
@@ -499,6 +618,16 @@ contract DSCEngine is ReentrancyGuard {
         return amountUsd / convertToUsd(toToken,1);
     }
 
+    /**
+     *  @notice convertToUsd()
+     *          utility function for converting any given token amount into equivalent USD.
+     *          this function will not accept dsc token, nor is it necessary since dsc is pegged
+     *              1:1 to USD, ie: 1 DSC converts to 1 USD.
+     *  @dev    note that the output rounds off to the nearest dollar, ie: all decimals are truncated off.
+     *          note also that this conversion is based on prices retrieved at the time of this call.
+     *              this output should not be stored for later use as it may become stale but should
+     *              be requested afresh when needed.
+     */
     function convertToUsd(
         address token, 
         uint256 amount) 
@@ -531,6 +660,15 @@ contract DSCEngine is ReentrancyGuard {
         return (uint256(answer) * amount / decimalPrecision);
     }
 
+    /**
+     *  @notice getValueOfDepositsHeldInUsd()
+     *          utility function for retrieving the total value in USD of all deposits held by a given user.
+     *          to protect the privacy of the user, this function is internal and view only.
+     *  @dev    note that the output rounds off to the nearest dollar, ie: all decimals are truncated off.
+     *          note also that this conversion is based on prices retrieved at the time of this call.
+     *              this output should not be stored for later use as it may become stale but should
+     *              be requested afresh when needed.
+     */
     function getValueOfDepositsHeldInUsd(address user) internal view returns (uint256 valueInUsd) 
     {
         // loop through all allowed collateral tokens
@@ -545,6 +683,14 @@ contract DSCEngine is ReentrancyGuard {
         //return valueInUsd;    // redundant
     }
 
+    /**
+     *  @notice getValueOfMintsHeldInUsd()
+     *          utility function for retrieving the total value in USD of all minted DSC tokens held by a 
+     *              given user.
+     *          to protect the privacy of the user, this function is internal and view only.
+     *          since DSC token is pegged 1:1 to USD, so the output is basically the amount of minted DSC 
+     *              held by the user.
+     */
     function getValueOfMintsHeldInUsd(address user) internal view returns (uint256 valueInUsd) {
         // since DSC token is USD-pegged 1:1, no extra logic needed to convert DSC token amount to its equivalent USD value
         return s_userToDSCMintHeld[user];
@@ -562,17 +708,23 @@ contract DSCEngine is ReentrancyGuard {
     function getThresholdLimitPercent() external view returns (uint256) {
         return i_thresholdLimitPercent;
     }
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // This function is UNSAFE as it returns the internal array s_allowedCollateralTokens by reference,
     //  allowing the array to be modified outside of this function or even outside of the contract.
-    // The safer way to access the contents of s_allowedCollateralTokens is to retrieve its length by
-    //  calling getAllowedCollateralTokensArrayLength(), and then access its elements 1 by 1 by calling 
+    // From within this contract, functions can already directly access the s_allowedCollateralTokens 
+    //  array with no additional safety concerns.
+    // For externals, the safer way to access the contents of s_allowedCollateralTokens is to retrieve 
+    //  its length via getAllowedCollateralTokensArrayLength(), and then access its elements 1 by 1 via
     //  getAllowedCollateralTokens(). The return values for these 2 functions are "pass-by-value" and 
-    //  will not modify the contents of the internal array s_allowedCollateralTokens.
+    //  will not modify the contents of the actual private array s_allowedCollateralTokens.
     /*
     function getAllowedCollateralTokensArray() external view returns (uint256 arrayLength,address[] memory allowedTokensArray) {
         return (s_allowedCollateralTokens.length,s_allowedCollateralTokens);
     }
     */
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
     function getAllowedCollateralTokensArrayLength() external view returns (uint256) {
         return s_allowedCollateralTokens.length;
     }
@@ -588,8 +740,7 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // Maybe exposing these 2 functions to anyone to call is not a good idea. Users' privacy should be protected.
-    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Maybe exposing these 2 functions to any external to call is not a good idea. Users' privacy should be protected.
     function getDepositHeld(address user,address token) external view onlyAllowedTokens(token) returns (uint256) {
         return s_userToCollateralDepositHeld[user][token];
     }
@@ -602,7 +753,7 @@ contract DSCEngine is ReentrancyGuard {
     /**
      *  Test Scaffolding
      *  These wrapper functions expose internal functions for the purpose of testing them.
-     *  This whole section should be commented out and/or removed when testing is completed.
+     *  This whole section should be removed when from the final deployment/production code.
      */
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     function exposeconvertToUsd(address token,uint256 amount) public view returns (uint256) {

@@ -22,11 +22,8 @@ audits and proof-of-reserve transactions further enhance trust in the system by
 verifying that the Bitcoin backing wBTC exists and is secure" 
  - excerpt from https://www.gemini.com/cryptopedia/wbtc-what-is-wrapped-bitcoin
 
-TODOs
-1. ~write unit tests for MockAggregatorV3~  DONE
-2. ~write integration tests for DeployDSCEngine~  DONE
-3. ~write unit/integration tests for DSCEngine~ DONE
-4. complete implementation for DSCEngine
+Outstanding Tasks
+1. complete implementation for liquidate() and redeemCollateralBurnDSC()
 5. complete tests for DSCEngine
 
 Cyfrin Updraft explores advanced fuzz-testing and oracles management in the last part 
