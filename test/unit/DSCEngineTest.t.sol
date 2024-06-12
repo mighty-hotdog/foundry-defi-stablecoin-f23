@@ -117,7 +117,7 @@ contract DSCEngineTest is Test {
         address[] memory arrayPriceFeed = new address[](arrayLength);
         uint256[] memory arrayPrecision = new uint256[](arrayLength);
         arrayCollateral[0] = address(0);
-        vm.expectRevert(DSCEngine.DSCEngine__CollateralTokenAddressCannotBeZero.selector);
+        vm.expectRevert(DSCEngine.DSCEngine__TokenAddressCannotBeZero.selector);
         new DSCEngine(arrayCollateral,arrayPriceFeed,arrayPrecision,dscTokenAddress,thresholdLimit);
     }
     function testPriceFeedAddressCannotBeZero(uint256 arrayLength,uint256 thresholdLimit) external {
@@ -199,7 +199,7 @@ contract DSCEngineTest is Test {
     function testDepositTokenWithZeroAddress(uint256 randomDepositAmount) external {
         randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
         vm.prank(USER);
-        vm.expectRevert(DSCEngine.DSCEngine__CollateralTokenAddressCannotBeZero.selector);
+        vm.expectRevert(DSCEngine.DSCEngine__TokenAddressCannotBeZero.selector);
         engine.depositCollateral(address(0),randomDepositAmount);
     }
     function testDepositNonAllowedTokens(address randomTokenAddress,uint256 randomDepositAmount) external {
@@ -342,7 +342,7 @@ contract DSCEngineTest is Test {
 
         // get token address for weth and wbtc for use later
         (address weth,address wbtc,,,,) = config.s_activeChainConfig();
-        //  1. set arbitrary max deposit limit = 1mil USD
+        //  1. set arbitrary max deposit limit = 1 billion USD
         uint256 maxDepositValueInUSD = 1000000000;  // 1 billion USD
         //  2. bound valueOfDepositsHeld by max deposit limit
         valueOfDepositsHeld = bound(valueOfDepositsHeld,1,maxDepositValueInUSD);
@@ -439,8 +439,8 @@ contract DSCEngineTest is Test {
 
         // get token address for weth and wbtc for use later
         (address weth,address wbtc,,,,) = config.s_activeChainConfig();
-        //  1. set arbitrary max deposit limit = 1mil USD
-        uint256 maxDepositValueInUSD = 1000000;
+        //  1. set arbitrary max deposit limit = 1 billion USD
+        uint256 maxDepositValueInUSD = 1000000000;  // 1 billion USD
         //  2. bound valueOfDepositsHeld by max deposit limit
         valueOfDepositsHeld = bound(valueOfDepositsHeld,1,maxDepositValueInUSD);
         // get mock price of weth from .env
@@ -530,51 +530,245 @@ contract DSCEngineTest is Test {
     ////////////////////////////////////////////////////////////////////
     // Unit tests for convertFromTo()
     ////////////////////////////////////////////////////////////////////
+    function testConvertFromZero(uint256 randomAmount) external {
+        vm.expectRevert(DSCEngine.DSCEngine__TokenAddressCannotBeZero.selector);
+        engine.exposeconvertFromTo(address(0),randomAmount,makeAddr("toToken"));
+    }
+    function testConvertToZero(uint256 randomAmount) external {
+        address allowedToken = engine.getAllowedCollateralTokens(0);
+        vm.expectRevert(DSCEngine.DSCEngine__TokenAddressCannotBeZero.selector);
+        engine.exposeconvertFromTo(allowedToken,randomAmount,address(0));
+    }
+    function testConvertFromZeroToZero(uint256 randomAmount) external {
+        vm.expectRevert(DSCEngine.DSCEngine__TokenAddressCannotBeZero.selector);
+        engine.exposeconvertFromTo(address(0),randomAmount,address(0));
+    }
+    function testConvertFromNonAllowed(uint256 randomAmount,address randomToken) external {
+        vm.assume(randomToken != address(0));
+        bool isNonAllowedToken = true;
+        for(uint256 i=0;i<engine.getAllowedCollateralTokensArrayLength();i++) {
+            if (randomToken == engine.getAllowedCollateralTokens(i)) {
+                isNonAllowedToken = false;
+                break;
+            }
+        }
+        if (isNonAllowedToken) {
+            address allowedToken = engine.getAllowedCollateralTokens(0);
+            vm.prank(USER);
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("DSCEngine__TokenNotAllowed(address)")),
+                    randomToken));
+            engine.exposeconvertFromTo(
+                randomToken,
+                randomAmount,
+                allowedToken);
+        }
+    }
+    function testConvertToNonAllowed(uint256 randomAmount,address randomToken) external {
+        vm.assume(randomToken != address(0));
+        bool isNonAllowedToken = true;
+        for(uint256 i=0;i<engine.getAllowedCollateralTokensArrayLength();i++) {
+            if (randomToken == engine.getAllowedCollateralTokens(i)) {
+                isNonAllowedToken = false;
+                break;
+            }
+        }
+        if (isNonAllowedToken) {
+            address allowedToken = engine.getAllowedCollateralTokens(0);
+            vm.prank(USER);
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("DSCEngine__TokenNotAllowed(address)")),
+                    randomToken));
+            engine.exposeconvertFromTo(
+                allowedToken,
+                randomAmount,
+                randomToken);
+        }
+    }
+    function testConvertFromNonAllowedToNonAllowed(uint256 randomAmount,address randomTokenA,address randomTokenB) external {
+        vm.assume(randomTokenA != address(0));
+        vm.assume(randomTokenB != address(0));
+        bool isNonAllowedToken = true;
+        for(uint256 i=0;i<engine.getAllowedCollateralTokensArrayLength();i++) {
+            address token = engine.getAllowedCollateralTokens(i);
+            if ((randomTokenA == token) || (randomTokenB == token)) {
+                isNonAllowedToken = false;
+                break;
+            }
+        }
+        if (isNonAllowedToken) {
+            vm.prank(USER);
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("DSCEngine__TokenNotAllowed(address)")),
+                    randomTokenA));
+            engine.exposeconvertFromTo(
+                randomTokenA,
+                randomAmount,
+                randomTokenB);
+        }
+    }
+    function testConvertWethToWbtc(uint256 randomAmount) external view {
+        randomAmount = bound(randomAmount,0,1e5);   // 1e5 == 100,000 tokens, arbitrary limit to prevent calc overflow
+        (address weth,address wbtc,,,,) = config.s_activeChainConfig();
+        console.log(randomAmount," wETH converted to ",engine.exposeconvertFromTo(weth,randomAmount,wbtc)," wBTC");
+    }
+    function testConvertWbtcToWeth(uint256 randomAmount) external view {
+        randomAmount = bound(randomAmount,0,1e5);   // 1e5 == 100,000 tokens, arbitrary limit to prevent calc overflow
+        (address weth,address wbtc,,,,) = config.s_activeChainConfig();
+        console.log(randomAmount," wBTC converted to ",engine.exposeconvertFromTo(wbtc,randomAmount,weth)," wETH");
+    }
+    function testConvertWethToWbtcOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
+        randomAmount = bound(randomAmount,0,1e5);   // 1e5 == 100,000 tokens, arbitrary limit to prevent calc overflow
+        (address weth,address wbtc,,,,) = config.s_activeChainConfig();
+        uint256 returnValue = engine.exposeconvertFromTo(weth,randomAmount,wbtc);
+        console.log(randomAmount," wETH converted to ",returnValue," wBTC");
+        // wethToUsd = randomAmount * wethPriceFeedAnswer / precision
+        // wbtcPrice = wbtcPriceFeedAnswer / precision
+        // wethToWbtc = wethToUsd / wbtcPrice = randomAmount * wethPriceFeedAnswer / wbtcPriceFeedAnswer
+        uint256 mockWethPriceFeedAnswer = vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD");
+        uint256 mockWbtcPriceFeedAnswer = vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD");
+        assertEq(
+            returnValue,
+            randomAmount * mockWethPriceFeedAnswer / mockWbtcPriceFeedAnswer);
+    }
+    function testConvertWbtcToWethOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
+        randomAmount = bound(randomAmount,0,1e5);   // 1e5 == 100,000 tokens, arbitrary limit to prevent calc overflow
+        (address weth,address wbtc,,,,) = config.s_activeChainConfig();
+        uint256 returnValue = engine.exposeconvertFromTo(wbtc,randomAmount,weth);
+        console.log(randomAmount," wBTC converted to ",returnValue," wETH");
+        // wbtcToWeth = wbtcToUsd / wethPrice = randomAmount * wbtcPriceFeedAnswer / wethPriceFeedAnswer
+        uint256 mockWethPriceFeedAnswer = vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD");
+        uint256 mockWbtcPriceFeedAnswer = vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD");
+        assertEq(
+            returnValue,
+            randomAmount * mockWbtcPriceFeedAnswer / mockWethPriceFeedAnswer);
+    }
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for convertFromUsd()
     ////////////////////////////////////////////////////////////////////
+    function testConvertToZeroTokenAddress(uint256 randomAmount) external {
+        vm.expectRevert(DSCEngine.DSCEngine__TokenAddressCannotBeZero.selector);
+        engine.exposeconvertFromUsd(randomAmount,address(0));
+    }
+    function testConvertToNonAllowedTokens(uint256 randomAmount,address randomToken) external {
+        vm.assume(randomToken != address(0));
+        bool isNonAllowedToken = true;
+        for(uint256 i=0;i<engine.getAllowedCollateralTokensArrayLength();i++) {
+            if (randomToken == engine.getAllowedCollateralTokens(i)) {
+                isNonAllowedToken = false;
+                break;
+            }
+        }
+        if (isNonAllowedToken) {
+            vm.prank(USER);
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("DSCEngine__TokenNotAllowed(address)")),
+                    randomToken));
+            engine.exposeconvertFromUsd(randomAmount,randomToken);
+        }
+    }
+    function testConvertToWETH(uint256 randomAmount) external view {
+        randomAmount = bound(randomAmount,0,1e9);   // 1e9 == 1 billion USD, arbitrary limit to prevent calc overflow
+        (address weth,,,,,) = config.s_activeChainConfig();
+        console.log(randomAmount," USD converted to ",engine.exposeconvertFromUsd(randomAmount,weth)," wEth");
+    }
+    function testConvertToWBTC(uint256 randomAmount) external view {
+        randomAmount = bound(randomAmount,0,1e9);   // 1e9 == 1 billion USD, arbitrary limit to prevent calc overflow
+        (,address wbtc,,,,) = config.s_activeChainConfig();
+        console.log(randomAmount," USD converted to ",engine.exposeconvertFromUsd(randomAmount,wbtc)," wBTC");
+    }
+    function testConvertToWETHOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
+        // This test performs an assertEq() comparing function return vs mock datafeed answer set in the 
+        //  .env, hence it can only pass when referencing mock data feeds deployed in Anvil. Therefore 
+        //  skip if on any chain other than Anvil.
+        randomAmount = bound(randomAmount,0,1e9);   // 1e9 == 1 billion USD, arbitrary limit to prevent calc overflow
+        (address weth,,,,,) = config.s_activeChainConfig();
+        uint256 returnValue = engine.exposeconvertFromUsd(randomAmount,weth);
+        console.log(randomAmount," USD converted to ",returnValue," wETH");
+        assertEq(
+            returnValue,
+            randomAmount * (10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_ETH_USD")))
+                / vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD"));
+    }
+    function testConvertToWBTCOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
+        // This test performs an assertEq() comparing function return vs mock datafeed answer set in the 
+        //  .env, hence it can only pass when referencing mock data feeds deployed in Anvil. Therefore 
+        //  skip if on any chain other than Anvil.
+        randomAmount = bound(randomAmount,0,1e9);   // 1e9 == 1 billion USD, arbitrary limit to prevent calc overflow
+        (,address wbtc,,,,) = config.s_activeChainConfig();
+        uint256 returnValue = engine.exposeconvertFromUsd(randomAmount,wbtc);
+        console.log(randomAmount," USD converted to ",returnValue," wBTC");
+        assertEq(
+            returnValue,
+            randomAmount * (10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_BTC_USD")))
+                / vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD"));
+    }
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for convertToUsd()
     ////////////////////////////////////////////////////////////////////
-    function testConvertWETH(uint256 randomAmount) external view {
-        randomAmount = bound(randomAmount,0,100);
+    function testConvertFromZeroTokenAddress(uint256 randomAmount) external {
+        vm.expectRevert(DSCEngine.DSCEngine__TokenAddressCannotBeZero.selector);
+        engine.exposeconvertToUsd(address(0),randomAmount);
+    }
+    function testConvertFromNonAllowedTokens(uint256 randomAmount,address randomToken) external {
+        vm.assume(randomToken != address(0));
+        bool isNonAllowedToken = true;
+        for(uint256 i=0;i<engine.getAllowedCollateralTokensArrayLength();i++) {
+            if (randomToken == engine.getAllowedCollateralTokens(i)) {
+                isNonAllowedToken = false;
+                break;
+            }
+        }
+        if (isNonAllowedToken) {
+            vm.prank(USER);
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("DSCEngine__TokenNotAllowed(address)")),
+                    randomToken));
+            engine.exposeconvertToUsd(randomToken,randomAmount);
+        }
+    }
+    function testConvertFromWETH(uint256 randomAmount) external view {
+        randomAmount = bound(randomAmount,0,1e5);   // 1e5 == 100,000 tokens, arbitrary limit to prevent calc overflow
         (address weth,,,,,) = config.s_activeChainConfig();
         console.log(randomAmount," wETH converted to ",engine.exposeconvertToUsd(weth,randomAmount)," USD");
     }
-    function testConvertWBTC(uint256 randomAmount) external view {
-        randomAmount = bound(randomAmount,0,100);
+    function testConvertFromWBTC(uint256 randomAmount) external view {
+        randomAmount = bound(randomAmount,0,1e5);   // 1e5 == 100,000 tokens, arbitrary limit to prevent calc overflow
         (,address wbtc,,,,) = config.s_activeChainConfig();
         console.log(randomAmount," wBTC converted to ",engine.exposeconvertToUsd(wbtc,randomAmount)," USD");
     }
-    function testConvertWETHOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
+    function testConvertFromWETHOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
         // This test performs an assertEq() comparing function return vs mock datafeed answer set in the 
         //  .env, hence it can only pass when referencing mock data feeds deployed in Anvil. Therefore 
         //  skip if on any chain other than Anvil.
-        randomAmount = bound(randomAmount,0,100);
+        randomAmount = bound(randomAmount,0,1e5);   // 1e5 == 100,000 tokens, arbitrary limit to prevent calc overflow
         (address weth,,,,,) = config.s_activeChainConfig();
         uint256 returnValue = engine.exposeconvertToUsd(weth,randomAmount);
         console.log(randomAmount," wETH converted to ",returnValue," USD");
         assertEq(
             returnValue,
-            vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD") * 
-                randomAmount / 
-                10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_ETH_USD")));
+            vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD") * randomAmount 
+                / (10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_ETH_USD"))));
     }
-    function testConvertWBTCOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
+    function testConvertFromWBTCOnAnvil(uint256 randomAmount) external view skipIfNotOnAnvil {
         // This test performs an assertEq() comparing function return vs mock datafeed answer set in the 
         //  .env, hence it can only pass when referencing mock data feeds deployed in Anvil. Therefore 
         //  skip if on any chain other than Anvil.
-        randomAmount = bound(randomAmount,0,100);
+        randomAmount = bound(randomAmount,0,1e5);   // 1e5 == 100,000 tokens, arbitrary limit to prevent calc overflow
         (,address wbtc,,,,) = config.s_activeChainConfig();
         uint256 returnValue = engine.exposeconvertToUsd(wbtc,randomAmount);
         console.log(randomAmount," wBTC converted to ",returnValue," USD");
         assertEq(
             returnValue,
-            vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD") * 
-                randomAmount / 
-                10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_BTC_USD")));
+            vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD") * randomAmount 
+                / (10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_BTC_USD"))));
     }
 
     ////////////////////////////////////////////////////////////////////
@@ -629,6 +823,51 @@ contract DSCEngineTest is Test {
     ////////////////////////////////////////////////////////////////////
     // Unit tests for _burnDSC()
     ////////////////////////////////////////////////////////////////////
+    function test_burnZeroAmount() external {
+        address dscFrom = makeAddr("dscFrom");
+        address onBehalfOf = makeAddr("onBehalfOf");
+        vm.expectRevert(DSCEngine.DSCEngine__AmountCannotBeZero.selector);
+        engine.expose_burnDSC(
+            dscFrom,
+            onBehalfOf,
+            0);
+    }
+    function test_burnInsufficientBalance(uint256 burnAmount,uint256 amountHeld) external {
+        vm.assume(amountHeld != 0);
+        vm.assume(burnAmount > amountHeld);
+        address dscFrom = makeAddr("dscFrom");
+        address onBehalfOf = makeAddr("onBehalfOf");
+        vm.prank(address(engine));
+        coin.mint(dscFrom,amountHeld);
+        assertEq(
+            coin.balanceOf(dscFrom),
+            amountHeld);
+        assertGt(burnAmount,amountHeld);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(keccak256("DSCEngine__RequestedBurnAmountExceedsBalance(address,uint256,uint256)")),
+                dscFrom,
+                amountHeld,
+                burnAmount));
+        engine.expose_burnDSC(
+            dscFrom,
+            onBehalfOf,
+            burnAmount);
+    }
+    function test_burnStateCorrectlyUpdated(uint256 burnAmount,uint256 amountHeld) external {
+        vm.assume(burnAmount != 0);
+        vm.assume(amountHeld > burnAmount);
+        address dscFrom = makeAddr("dscFrom");
+        vm.prank(address(engine));
+        coin.mint(dscFrom,amountHeld);
+        assertEq(
+            coin.balanceOf(dscFrom),
+            amountHeld);
+        assertGt(amountHeld,burnAmount);
+
+        address onBehalfOf = makeAddr("onBehalfOf");
+
+    }
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for getFractionRemovalMultiplier()

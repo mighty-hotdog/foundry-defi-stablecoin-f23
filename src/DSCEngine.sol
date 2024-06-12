@@ -30,7 +30,7 @@ contract DSCEngine is ReentrancyGuard {
         uint256 lengthOfCollateralAddressesArray,
         uint256 lengthOfPriceFeedsArray,
         uint256 lengthOfPriceFeedsPrecisionArray);
-    error DSCEngine__CollateralTokenAddressCannotBeZero();
+    error DSCEngine__TokenAddressCannotBeZero();
     error DSCEngine__PriceFeedAddressCannotBeZero();
     error DSCEngine__PriceFeedPrecisionCannotBeZero();
     error DSCEngine__DscTokenAddressCannotBeZero();
@@ -109,7 +109,7 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     modifier onlyAllowedTokens(address collateralAddress) {
         if (collateralAddress == address(0)) {
-            revert DSCEngine__CollateralTokenAddressCannotBeZero();
+            revert DSCEngine__TokenAddressCannotBeZero();
         }
         if (s_tokenToPriceFeed[collateralAddress].priceFeed == address(0)) {
             revert DSCEngine__TokenNotAllowed(collateralAddress);
@@ -254,7 +254,7 @@ contract DSCEngine is ReentrancyGuard {
         }
         for(uint256 i=0;i<allowedCollateralTokenAddresses.length;i++) {
             if (allowedCollateralTokenAddresses[i] == address(0)) {
-                revert DSCEngine__CollateralTokenAddressCannotBeZero();
+                revert DSCEngine__TokenAddressCannotBeZero();
             }
             if (collateralTokenPriceFeedAddresses[i] == address(0)) {
                 revert DSCEngine__PriceFeedAddressCannotBeZero();
@@ -924,6 +924,12 @@ contract DSCEngine is ReentrancyGuard {
      *  This whole section should be removed when from the final deployment/production code.
      */
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    function exposeconvertFromTo(address fromToken,uint256 amount,address toToken) public view returns (uint256) {
+        return convertFromTo(fromToken,amount,toToken);
+    }
+    function exposeconvertFromUsd(uint256 amount,address token) public view returns (uint256) {
+        return convertFromUsd(amount,token);
+    }
     function exposeconvertToUsd(address token,uint256 amount) public view returns (uint256) {
         return convertToUsd(token,amount);
     }
@@ -933,4 +939,19 @@ contract DSCEngine is ReentrancyGuard {
     function exposegetValueOfDscMintsInUsd(address user) public view returns (uint256) {
         return getValueOfDscMintsInUsd(user);
     }
+    function expose_redeemCollateral(
+        address from,
+        address to,
+        address collateralTokenAddress,
+        uint256 requestedRedeemAmount
+        ) public {
+            _redeemCollateral(from,to,collateralTokenAddress,requestedRedeemAmount);
+        }
+    function expose_burnDSC(
+        address dscFrom,
+        address onBehalfOf,
+        uint256 requestedBurnAmount
+        ) public {
+            _burnDSC(dscFrom,onBehalfOf,requestedBurnAmount);
+        }
 }
