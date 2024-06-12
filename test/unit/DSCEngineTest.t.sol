@@ -22,8 +22,8 @@ contract DSCEngineTest is Test {
     //////////////////////////////////////////////////////////////////
     // All events emitted by DSCEngine contract and to be tested for
     //////////////////////////////////////////////////////////////////
-    event CollateralDeposited(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
-    event DSCMinted(address indexed toUser,uint256 indexed amount);
+    //event CollateralDeposited(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
+    //event DSCMinted(address indexed toUser,uint256 indexed amount);
     //////////////////////////////////////////////////////////////////
 
     /* Modifiers */
@@ -45,6 +45,8 @@ contract DSCEngineTest is Test {
         // prepare prank users with appropriate balances
         USER = makeAddr("user");
         /*
+        // better to setup the test variables from within each test according to the 
+        //  needs of each situation.
         (
             address weth,
             address wbtc,
@@ -98,7 +100,12 @@ contract DSCEngineTest is Test {
             console.log("arrayOne.length: ",arrayOne.length);
             console.log("arrayTwo.length: ",arrayTwo.length);
             console.log("arrayThree.length: ",arrayThree.length);
-            vm.expectRevert();
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("DSCEngine__ConstructorInputParamsMismatch(uint256,uint256,uint256)")),
+                    arrayOne.length,
+                    arrayTwo.length,
+                    arrayThree.length));
             new DSCEngine(arrayOne,arrayTwo,arrayThree,dscTokenAddress,thresholdLimit);
         }
     }
@@ -125,7 +132,20 @@ contract DSCEngineTest is Test {
         vm.expectRevert(DSCEngine.DSCEngine__PriceFeedAddressCannotBeZero.selector);
         new DSCEngine(arrayCollateral,arrayPriceFeed,arrayPrecision,dscTokenAddress,thresholdLimit);
     }
-    // This test testCorrectAllowedCollateralTokensAndPriceFeeds() is more of a deployment/integration test.
+    function testPriceFeedPrecisionCannotBeZero(uint256 arrayLength,uint256 thresholdLimit) external {
+        arrayLength = bound(arrayLength,2,256);
+        thresholdLimit = bound(thresholdLimit,1,99);
+        address dscTokenAddress = makeAddr("mock token address");
+        address[] memory arrayCollateral = new address[](arrayLength);
+        address[] memory arrayPriceFeed = new address[](arrayLength);
+        uint256[] memory arrayPrecision = new uint256[](arrayLength);
+        arrayCollateral[0] = makeAddr("collateral");
+        arrayPriceFeed[0] = makeAddr("price feed");
+        arrayPrecision[0] = 0;
+        vm.expectRevert(DSCEngine.DSCEngine__PriceFeedPrecisionCannotBeZero.selector);
+        new DSCEngine(arrayCollateral,arrayPriceFeed,arrayPrecision,dscTokenAddress,thresholdLimit);
+    }
+    // Skipped. This is more of a deployment/integration test.
     // It is already performed in the DeployDSCEngineTest test script under:
     //  1. testDeployInSepoliaWithCorrectAllowedCollateralTokensAndPriceFeeds()
     //  2. testDeployInMainnetWithCorrectAllowedCollateralTokensAndPriceFeeds()
@@ -133,8 +153,49 @@ contract DSCEngineTest is Test {
     //function testCorrectAllowedCollateralTokensAndPriceFeeds() external {}
 
     ////////////////////////////////////////////////////////////////////
+    // Unit tests for getAllDeposits()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getDepositAmount()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getDepositsValueInUsd()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getMints()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getMintsValueInUsd()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getTokensHeld()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getTokensHeldValueInUsd()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for depositCollateralMintDSC()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
     // Unit tests for depositCollateral()
     ////////////////////////////////////////////////////////////////////
+    function testDepositZeroAmount() external {
+        uint256 arraySize = engine.getAllowedCollateralTokensArrayLength();
+        for(uint256 i=0;i<arraySize;i++) {
+            address token = engine.getAllowedCollateralTokens(i);
+            vm.prank(USER);
+            vm.expectRevert(DSCEngine.DSCEngine__AmountCannotBeZero.selector);
+            engine.depositCollateral(token,0);
+        }
+    }
     function testDepositTokenWithZeroAddress(uint256 randomDepositAmount) external {
         randomDepositAmount = bound(randomDepositAmount,1,type(uint256).max);
         vm.prank(USER);
@@ -155,7 +216,10 @@ contract DSCEngineTest is Test {
         if (isNonAllowedToken) {
             // if deposit non-allowed token, revert
             vm.prank(USER);
-            vm.expectRevert();
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    bytes4(keccak256("DSCEngine__TokenNotAllowed(address)")),
+                    randomTokenAddress));
             engine.depositCollateral(randomTokenAddress,randomDepositAmount);
         }
     }
@@ -180,15 +244,6 @@ contract DSCEngineTest is Test {
             //  3. perform the actual deposit call as USER
             vm.prank(USER);
             engine.depositCollateral(token,randomDepositAmount);
-        }
-    }
-    function testDepositZeroAmount() external {
-        uint256 arraySize = engine.getAllowedCollateralTokensArrayLength();
-        for(uint256 i=0;i<arraySize;i++) {
-            address token = engine.getAllowedCollateralTokens(i);
-            vm.prank(USER);
-            vm.expectRevert(DSCEngine.DSCEngine__AmountCannotBeZero.selector);
-            engine.depositCollateral(token,0);
         }
     }
     function testDepositStateCorrectlyUpdated(uint256 randomDepositAmount) external skipIfNotOnAnvil {
@@ -219,11 +274,11 @@ contract DSCEngineTest is Test {
             vm.prank(USER);
             uint256 depositHeld = engine.getDepositAmount(token);
             assert(
-                // check that engine deposit records are correct
+                // check that user deposit records on engine are correct
                 (depositHeld == randomDepositAmount) &&
-                // check that user balance is correct
+                // check that user token balance is correct
                 (ERC20Mock(token).balanceOf(USER) == 0) &&
-                // check that engine balance is correct
+                // check that engine token balance is correct
                 (ERC20Mock(token).balanceOf(address(engine)) == randomDepositAmount)
             );
         }
@@ -246,7 +301,7 @@ contract DSCEngineTest is Test {
             ERC20Mock(token).approve(address(engine),randomDepositAmount);
             //  3. perform the actual deposit call as USER
             vm.expectEmit(true,true,true,false,address(engine));
-            emit CollateralDeposited(USER,token,randomDepositAmount);
+            emit DSCEngine.CollateralDeposited(USER,token,randomDepositAmount);
             vm.prank(USER);
             engine.depositCollateral(token,randomDepositAmount);
         }
@@ -273,7 +328,7 @@ contract DSCEngineTest is Test {
         //  mint(). Skip this test on any other chain.
         
         // how to test mintDSC()
-        //  1. set arbitrary max deposit limit = 1mil USD
+        //  1. set arbitrary max deposit limit = 1 billion USD
         //  2. bound valueOfDepositsHeld by max deposit limit
         //  3. bound wethDepositAmount by max deposit limit
         //  4. bound wbtcDepositAmount by max deposit limit for a particular random wethDepositAmount value
@@ -288,7 +343,7 @@ contract DSCEngineTest is Test {
         // get token address for weth and wbtc for use later
         (address weth,address wbtc,,,,) = config.s_activeChainConfig();
         //  1. set arbitrary max deposit limit = 1mil USD
-        uint256 maxDepositValueInUSD = 1000000;
+        uint256 maxDepositValueInUSD = 1000000000;  // 1 billion USD
         //  2. bound valueOfDepositsHeld by max deposit limit
         valueOfDepositsHeld = bound(valueOfDepositsHeld,1,maxDepositValueInUSD);
         // get mock price of weth from .env
@@ -332,17 +387,24 @@ contract DSCEngineTest is Test {
         }
         //  9. bound requestedMintAmount for a particular random valueOfMintsAlreadyHeld value such that mint
         //      request is **OUTSIDE** limit
+        uint256 maxSafeMintAmount = (numerator / engine.getFractionRemovalMultiplier()) - 
+            engine.exposegetValueOfDscMintsInUsd(USER);
         requestedMintAmount = bound(
             requestedMintAmount,
-            (numerator/engine.getFractionRemovalMultiplier())-engine.exposegetValueOfDscMintsInUsd(USER)+1,
+            maxSafeMintAmount+1,
             maxDepositValueInUSD);
         //  10. perform the test by calling mintDSC() for random requestedMintAmount and checking for revert
         vm.prank(USER);
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(keccak256("DSCEngine__RequestedMintAmountBreachesUserMintLimit(address,uint256,uint256)")),
+                USER,
+                requestedMintAmount,
+                maxSafeMintAmount));
         engine.mintDSC(requestedMintAmount);
     }
 
-    // Skipped. This test testMintWithinLimit() is already implicitly performed in testMintStateCorrectlyUpdated().
+    // Skipped. This test is already implicitly performed in testMintStateCorrectlyUpdated().
     //function testMintWithinLimit() external {}
 
     function testMintStateCorrectlyUpdated(
@@ -431,7 +493,7 @@ contract DSCEngineTest is Test {
             //  11. check that:
             //      a. expected event emitted
             vm.expectEmit(true,true,false,false,address(engine));
-            emit DSCMinted(USER,requestedMintAmount);
+            emit DSCEngine.DSCMinted(USER,requestedMintAmount);
             vm.prank(USER);
             engine.mintDSC(requestedMintAmount);
 
@@ -446,8 +508,24 @@ contract DSCEngineTest is Test {
         }
     }
 
-    // Skipped. This test testEmitDSCMinted() is already performed in testMintStateCorrectlyUpdated().
+    // Skipped. This test is already performed in testMintStateCorrectlyUpdated().
     //function testEmitDSCMinted() external {}
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for redeemCollateralBurnDSC()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for redeemCollateral()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for burnDSC()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for liquidate()
+    ////////////////////////////////////////////////////////////////////
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for convertFromTo()
@@ -540,6 +618,44 @@ contract DSCEngineTest is Test {
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for getValueOfDscMintsInUsd()
+    // Skipped. This function just returns contents of 
+    //  an internal variable.
     ////////////////////////////////////////////////////////////////////
-    function testValueOfMintsIsCorrect() external {}
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for _redeemCollateral()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for _burnDSC()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getFractionRemovalMultiplier()
+    // Skipped. This function just returns a constant.
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getDscTokenAddress()
+    // Skipped. This function just returns an immutable.
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getThresholdLimitPercent()
+    // Skipped. This function just returns an immutable.
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getAllowedCollateralTokensArrayLength()
+    // Skipped. This function just returns array length of
+    //  an internal array.
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getAllowedCollateralTokens()
+    ////////////////////////////////////////////////////////////////////
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for getPriceFeed()
+    ////////////////////////////////////////////////////////////////////
 }

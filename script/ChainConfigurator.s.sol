@@ -31,19 +31,25 @@ contract ChainConfigurator is Script {
         }
     }
     function getMainnetChainConfig() internal view returns (ChainConfig memory) {
-        address feedRegistry = vm.envAddress("CHAINLINK_FEED_REGISTRY_ADDRESS_MAINNET");
+        //address feedRegistry = vm.envAddress("CHAINLINK_FEED_REGISTRY_ADDRESS_MAINNET");
+        address wethPriceFeedAddress = vm.envAddress("WETH_CHAINLINK_PRICE_FEED_ADDRESS_MAINNET");
+        address wbtcPriceFeedAddress = vm.envAddress("WBTC_CHAINLINK_PRICE_FEED_ADDRESS_MAINNET");
         return ChainConfig({
             wETH: vm.envAddress("WETH_ADDRESS_MAINNET"),
             wBTC: vm.envAddress("WBTC_ADDRESS_MAINNET"),
+            /* More work needed to make this work with Chainlink Feed Registry
             wETHPriceFeed: address(FeedRegistryInterface(feedRegistry).getFeed(
                 Denominations.ETH,Denominations.USD)),
             wBTCPriceFeed: address(FeedRegistryInterface(feedRegistry).getFeed(
                 Denominations.BTC,Denominations.USD)),
             wETHPriceFeedPrecision: FeedRegistryInterface(feedRegistry).decimals(Denominations.ETH,Denominations.USD),
             wBTCPriceFeedPrecision: FeedRegistryInterface(feedRegistry).decimals(Denominations.BTC,Denominations.USD)
-            /* Deprecated. Use Chainlink Feed Registry to obtain these values instead.
-            wETHPriceFeed: vm.envAddress("WETH_CHAINLINK_PRICE_FEED_ADDRESS_MAINNET"),
-            wBTCPriceFeed: vm.envAddress("WBTC_CHAINLINK_PRICE_FEED_ADDRESS_MAINNET"),
+            */
+            wETHPriceFeed: wethPriceFeedAddress,
+            wBTCPriceFeed: wbtcPriceFeedAddress,
+            wETHPriceFeedPrecision: AggregatorV3Interface(wethPriceFeedAddress).decimals(),
+            wBTCPriceFeedPrecision: AggregatorV3Interface(wbtcPriceFeedAddress).decimals()
+            /* Deprecated. Use AggregatorV3Interface.decimals() instead.
             wETHPriceFeedPrecision: vm.envUint("WETH_CHAINLINK_PRICE_FEED_PRECISION_MAINNET"),
             wBTCPriceFeedPrecision: vm.envUint("WBTC_CHAINLINK_PRICE_FEED_PRECISION_MAINNET")
             */
