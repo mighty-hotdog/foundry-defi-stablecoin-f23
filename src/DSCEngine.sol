@@ -193,11 +193,13 @@ contract DSCEngine is ReentrancyGuard {
 
     modifier sufficientBalance(address user,address token,uint256 amount) {
         if (token == i_dscToken) {
+            // if token is DSC, check that user holds sufficient token balance
             uint256 dscBalance = DecentralizedStableCoin(token).balanceOf(user);
             if (amount > dscBalance) {
                 revert DSCEngine__RequestedBurnAmountExceedsBalance(user,dscBalance,amount);
             }
         } else {
+            // if token is collateral, check that user has sufficient deposits of this collateral in system
             uint256 deposit = s_userToCollateralDeposits[user][token];
             if (deposit < amount) {
                 revert DSCEngine__RequestedRedeemAmountExceedsBalance(user,token,deposit,amount);
@@ -812,12 +814,16 @@ contract DSCEngine is ReentrancyGuard {
         withinRedeemLimitSimple(from,collateralTokenAddress,requestedRedeemAmount) 
         nonReentrant 
     {
+        if ((from == address(0)) || (to == address(0))) {
+            revert DSCEngine__UserCannotBeZero();
+        }
         // 1st update state and send emits
         s_userToCollateralDeposits[from][collateralTokenAddress] -= requestedRedeemAmount;
         emit CollateralRedeemed(from,collateralTokenAddress,requestedRedeemAmount);
 
         // then perform actual action to effect the state change
-        bool success = IERC20(collateralTokenAddress).transferFrom(address(this),to,requestedRedeemAmount);
+        //bool success = IERC20(collateralTokenAddress).transferFrom(address(this),to,requestedRedeemAmount);
+        bool success = IERC20(collateralTokenAddress).transfer(to,requestedRedeemAmount);
         if (!success) {
             revert DSCEngine__TransferFailed(address(this),to,collateralTokenAddress,requestedRedeemAmount);
         }
