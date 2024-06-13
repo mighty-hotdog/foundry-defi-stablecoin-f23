@@ -34,7 +34,8 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__PriceFeedAddressCannotBeZero();
     error DSCEngine__PriceFeedPrecisionCannotBeZero();
     error DSCEngine__DscTokenAddressCannotBeZero();
-    error DSCEngine__TransferFailed(address from,address to,address collateralTokenAddress,uint256 amount);
+    // this error will never hit because ERC20's transfer() and transferFrom() just return true no matter what
+    //error DSCEngine__TransferFailed(address from,address to,address collateralTokenAddress,uint256 amount);
     error DSCEngine__RequestedMintAmountBreachesUserMintLimit(
         address user,uint256 requestedMintAmount,uint256 maxSafeMintAmount);
     error DSCEngine__DataFeedError(address tokenAddress, address priceFeedAddress, int answer);
@@ -120,6 +121,13 @@ contract DSCEngine is ReentrancyGuard {
     modifier moreThanZero(uint256 amount) {
         if (amount <= 0) {
             revert DSCEngine__AmountCannotBeZero();
+        }
+        _;
+    }
+
+    modifier nonZeroUser(address user) {
+        if (user == address(0)) {
+            revert DSCEngine__UserCannotBeZero();
         }
         _;
     }
@@ -445,6 +453,8 @@ contract DSCEngine is ReentrancyGuard {
         //  of tokens. This means DSCEngine is the "spender" that the user needs to approve 1st with an
         //  appropriate allowance of the token to be transferred.
         // In this case, the "to address" to transfer the tokens to is the DSCEngine itself.
+        IERC20(collateralTokenAddress).transferFrom(msg.sender,address(this),requestedDepositAmount);
+        /*
         bool success = IERC20(collateralTokenAddress).transferFrom(msg.sender,address(this),requestedDepositAmount);
         if (!success) {
             // Question: Will this revert also rollback the earlier statements in this function call?
@@ -464,6 +474,7 @@ contract DSCEngine is ReentrancyGuard {
             //  revert state changes. It merely allows the caller to react to the revert condition.
             revert DSCEngine__TransferFailed(msg.sender,address(this),collateralTokenAddress,requestedDepositAmount);
         }
+        */
     }
 
     /**
@@ -557,7 +568,7 @@ contract DSCEngine is ReentrancyGuard {
         _burnDSC(msg.sender,msg.sender,requestedBurnAmount);
     }
 
-    function liquidate(address userToLiquidate) external nonReentrant {
+    function liquidate(address userToLiquidate) external nonReentrant nonZeroUser(userToLiquidate) {
         // Question: What is liquidation?
         // Answer: Paying off a user's debt (minted dsc tokens in this case) and receiving the value of 
         //  his deposits backing that debt.
@@ -613,9 +624,6 @@ contract DSCEngine is ReentrancyGuard {
         //          b. collateral deposits is also zeroed
         
         // all checks //////////////////////////////////////////////////////////////
-        if (userToLiquidate == address(0)) {
-            revert DSCEngine__UserCannotBeZero();
-        }
         uint256 valueOfDscMints = getValueOfDscMintsInUsd(userToLiquidate);
         if (valueOfDscMints == 0) {
             revert DSCEngine__MintsCannotBeZero();
@@ -643,7 +651,7 @@ contract DSCEngine is ReentrancyGuard {
                 msg.sender,
                 s_allowedCollateralTokens[i],
                 s_userToCollateralDeposits[userToLiquidate][s_allowedCollateralTokens[i]]);
-            // in parallel, liquidated user collateral deposits zeroed /////////////
+            // liquidated user collateral deposits zeroed //////////////////////////
             delete s_userToCollateralDeposits[userToLiquidate][s_allowedCollateralTokens[i]];
         }
         emit Liquidated(userToLiquidate,valueOfDscMints,valueOfDeposits);
@@ -808,25 +816,28 @@ contract DSCEngine is ReentrancyGuard {
         address collateralTokenAddress,
         uint256 requestedRedeemAmount
         ) internal 
+        nonZeroUser(from)
+        nonZeroUser(to)
         moreThanZero(requestedRedeemAmount) 
         onlyAllowedTokens(collateralTokenAddress) 
         sufficientBalance(from,collateralTokenAddress,requestedRedeemAmount) 
         withinRedeemLimitSimple(from,collateralTokenAddress,requestedRedeemAmount) 
         nonReentrant 
     {
-        if ((from == address(0)) || (to == address(0))) {
-            revert DSCEngine__UserCannotBeZero();
-        }
         // 1st update state and send emits
         s_userToCollateralDeposits[from][collateralTokenAddress] -= requestedRedeemAmount;
         emit CollateralRedeemed(from,collateralTokenAddress,requestedRedeemAmount);
 
         // then perform actual action to effect the state change
+        IERC20(collateralTokenAddress).transfer(to,requestedRedeemAmount);
         //bool success = IERC20(collateralTokenAddress).transferFrom(address(this),to,requestedRedeemAmount);
+        /*
         bool success = IERC20(collateralTokenAddress).transfer(to,requestedRedeemAmount);
+        // will never hit
         if (!success) {
             revert DSCEngine__TransferFailed(address(this),to,collateralTokenAddress,requestedRedeemAmount);
         }
+        */
     }
 
     /**
@@ -850,6 +861,8 @@ contract DSCEngine is ReentrancyGuard {
         address onBehalfOf,
         uint256 requestedBurnAmount
         ) internal 
+        nonZeroUser(dscFrom)
+        nonZeroUser(onBehalfOf)
         moreThanZero(requestedBurnAmount) 
         sufficientBalance(dscFrom,i_dscToken,requestedBurnAmount) 
         nonReentrant 
@@ -860,10 +873,13 @@ contract DSCEngine is ReentrancyGuard {
 
         // then perform actual action to effect the state change
         // 1st transfer DSC to be burned from user to engine
+        IERC20(i_dscToken).transferFrom(dscFrom,address(this),requestedBurnAmount);
+        /*
         bool success = IERC20(i_dscToken).transferFrom(dscFrom,address(this),requestedBurnAmount);
         if (!success) {
             revert DSCEngine__TransferFailed(dscFrom,address(this),i_dscToken,requestedBurnAmount);
         }
+        */
         // then have the engine burn the DSC
         DecentralizedStableCoin(i_dscToken).burn(requestedBurnAmount);
     }
