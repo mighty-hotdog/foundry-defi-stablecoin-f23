@@ -519,7 +519,7 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     /**
-     *  @notice redeemCollateralBurnDSC()
+     *  @notice burnDSCRedeemCollateral()
      *          for any user to call.
      *          convenience function combining _burnDSC() and _redeemCollateral() in single call to save gas.
      *  @param  requestedBurnAmount DSC amount to burn
@@ -528,7 +528,7 @@ contract DSCEngine is ReentrancyGuard {
      *  @dev    all needed checks alrdy implemented in the constituent functions.
      *  @dev    user is msg.sender.
      */
-    function redeemCollateralBurnDSC(
+    function burnDSCRedeemCollateral(
         uint256 requestedBurnAmount,
         address collateralTokenAddress,
         uint256 requestedRedeemAmount

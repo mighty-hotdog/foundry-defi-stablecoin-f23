@@ -23,8 +23,8 @@ verifying that the Bitcoin backing wBTC exists and is secure"
  - excerpt from https://www.gemini.com/cryptopedia/wbtc-what-is-wrapped-bitcoin
 
 Outstanding Tasks
-1. ~complete implementation for liquidate() and redeemCollateralBurnDSC()~ DONE
-2. complete tests for DSCEngine
+1. complete tests for liquidate(), depositCollateralMintDSC(), burnDSCRedeemCollateral()
+2. implement and test oracle management
 
 Cyfrin Updraft explores advanced fuzz-testing and oracles management in the last part 
 of this course.
