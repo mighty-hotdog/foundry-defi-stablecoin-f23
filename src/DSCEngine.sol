@@ -3,8 +3,8 @@
 pragma solidity ^0.8.18;
 
 import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
-import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
-import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/v0.8/interfaces/AggregatorV3Interface.sol";
 
 /**
@@ -660,101 +660,6 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Internal Functions *//////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    /**
-     *  @notice convertFromTo()
-     *          utility function for converting from 1 token to another
-     *          this function will not accept dsc token. Conversion to/from dsc token is equivalent
-     *              to conversion to/from USD since dsc is pegged 1:1 to USD. The 2 functions
-     *              convertToUsd() and convertFromUsd() may be used instead.
-     *  @dev    note that the output rounds off to the nearest unit, ie: all decimals are truncated off.
-     *          note also that this conversion is based on prices retrieved at the time of this call.
-     *              this output should not be stored for later use as it may become stale but should
-     *              be requested afresh when needed.
-     *  @dev    note that this function will not accept dsc token. Conversion to/from dsc token is equivalent
-     *              to conversion to/from USD since dsc is pegged 1:1 to USD.
-     */
-    function convertFromTo(
-        address fromToken,
-        uint256 amount,
-        address toToken
-        ) internal view 
-        onlyAllowedTokens(fromToken) 
-        onlyAllowedTokens(toToken) 
-        returns (uint256) 
-    {
-        if (amount == 0) {
-            return 0;
-        }
-        return convertToUsd(fromToken,amount) / convertToUsd(toToken,1);
-    }
-
-    /**
-     *  @notice convertFromUsd()
-     *          utility function for converting from USD to the specified token,
-     *              ie: how much of the token can the given amount of USD buy
-     *          this function will not accept dsc token, nor is it necessary since dsc is pegged
-     *              1:1 to USD, ie: 1 USD buys 1 DSC.
-     *  @dev    note that the output rounds off to the nearest unit, ie: all decimals are truncated off.
-     *          note also that this conversion is based on prices retrieved at the time of this call.
-     *              this output should not be stored for later use as it may become stale but should
-     *              be requested afresh when needed.
-     */
-    function convertFromUsd(
-        uint256 amountUsd,
-        address toToken
-        ) internal view 
-        onlyAllowedTokens(toToken) 
-        returns (uint256) 
-    {
-        if (amountUsd == 0) {
-            return 0;
-        }
-        return amountUsd / convertToUsd(toToken,1);
-    }
-
-    /**
-     *  @notice convertToUsd()
-     *          utility function for converting any given token amount into equivalent USD.
-     *          this function will not accept dsc token, nor is it necessary since dsc is pegged
-     *              1:1 to USD, ie: 1 DSC converts to 1 USD.
-     *  @dev    note that the output rounds off to the nearest dollar, ie: all decimals are truncated off.
-     *          note also that this conversion is based on prices retrieved at the time of this call.
-     *              this output should not be stored for later use as it may become stale but should
-     *              be requested afresh when needed.
-     */
-    function convertToUsd(
-        address token, 
-        uint256 amount) 
-        internal view onlyAllowedTokens(token) 
-        returns (uint256 valueInUsd)
-    {
-        if (amount == 0) {
-            return 0;
-        }
-        // obtain price feed address
-        address priceFeed = s_tokenToPriceFeed[token].priceFeed;
-        // obtain token price from price feed
-        (,int answer,,,) = AggregatorV3Interface(priceFeed).latestRoundData();
-        if (answer <= 0) {
-            revert DSCEngine__DataFeedError(token,priceFeed,answer);
-        }
-        // multiply amount by token price and return value in USD
-        //return uint256(answer) * amount;
-        // Cyfrin Updraft says what Chainlink Data Feed returns is (price * decimal precision)
-        //  where decimal precision is given for each feed under Dec column in price feed page.
-        //  So according to Updraft, correct return value = (uint256(answer) * 1e10 * amount) / 1e18
-        //  Why? Dunno.
-        //  Ok so Updraft made it unnecessarily complicated.
-        //  Basically Chainlink Price Feed returns: int answer = (actual price in USD) * (decimal precision)
-        //  So to obtain value in USD for amountOfTokens:
-        //      (answer * amountOfTokens) / (decimal precision)
-        //  Since this expression must yield an integer, it means that this value is rounded off to 
-        //  the nearest dollar, with the decimal values (ie: cents) being truncated off.
-        uint256 decimalPrecision = 10**(AggregatorV3Interface(priceFeed).decimals());
-        return (uint256(answer) * amount / decimalPrecision);
-    }
-
     /**
      *  @notice getValueOfDepositsInUsd()
      *          utility function for retrieving the total value in USD of all deposits held by a given user.
@@ -803,7 +708,9 @@ contract DSCEngine is ReentrancyGuard {
      *              2. redemption is in allowed tokens
      *              3. sufficient balance exists in from user's collateral deposits
      *              4. from user's redeem limit is not breached with this redemption request
-     *          if all checks passed, then proceed to:
+     *  @dev    zero user address checks not needed because ERC20 transfer() and transferFrom() 
+     *          already perform these and will revert with appropriate reverts
+     *  @dev    if all checks passed, then proceed to:
      *              1. record redemption (ie: change internal state)
      *              2. emit event
      *              3. perform the actual token transfer
@@ -814,8 +721,6 @@ contract DSCEngine is ReentrancyGuard {
         address collateralTokenAddress,
         uint256 requestedRedeemAmount
         ) internal 
-        nonZeroUser(from)
-        nonZeroUser(to)
         moreThanZero(requestedRedeemAmount) 
         onlyAllowedTokens(collateralTokenAddress) 
         sufficientBalance(from,collateralTokenAddress,requestedRedeemAmount) 
@@ -848,7 +753,9 @@ contract DSCEngine is ReentrancyGuard {
      *  @dev    checks performed:
      *              1. burn amount is more than zero
      *              2. sufficient balance exists in dscFrom account
-     *          if all checks passed, then proceed to:
+     *  @dev    zero user address checks not needed because ERC20 transfer() and transferFrom() 
+     *          already perform these and will revert with appropriate reverts
+     *  @dev    if all checks passed, then proceed to:
      *              1. record burn (ie: change internal state)
      *              2. emit event
      *              3. perform the token transfer from user to DSCEngine
@@ -859,8 +766,6 @@ contract DSCEngine is ReentrancyGuard {
         address onBehalfOf,
         uint256 requestedBurnAmount
         ) internal 
-        nonZeroUser(dscFrom)
-        nonZeroUser(onBehalfOf)
         moreThanZero(requestedBurnAmount) 
         sufficientBalance(dscFrom,i_dscToken,requestedBurnAmount) 
         nonReentrant 
@@ -880,6 +785,104 @@ contract DSCEngine is ReentrancyGuard {
         */
         // then have the engine burn the DSC
         DecentralizedStableCoin(i_dscToken).burn(requestedBurnAmount);
+    }
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /* Public Utility Functions *////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /**
+     *  @notice convertFromTo()
+     *          utility function for converting from 1 token to another
+     *          this function will not accept dsc token. Conversion to/from dsc token is equivalent
+     *              to conversion to/from USD since dsc is pegged 1:1 to USD. The 2 functions
+     *              convertToUsd() and convertFromUsd() may be used instead.
+     *  @dev    note that the output rounds off to the nearest unit, ie: all decimals are truncated off.
+     *          note also that this conversion is based on prices retrieved at the time of this call.
+     *              this output should not be stored for later use as it may become stale but should
+     *              be requested afresh when needed.
+     *  @dev    note that this function will not accept dsc token. Conversion to/from dsc token is equivalent
+     *              to conversion to/from USD since dsc is pegged 1:1 to USD.
+     */
+    function convertFromTo(
+        address fromToken,
+        uint256 amount,
+        address toToken
+        ) public view 
+        onlyAllowedTokens(fromToken) 
+        onlyAllowedTokens(toToken) 
+        returns (uint256) 
+    {
+        if (amount == 0) {
+            return 0;
+        }
+        return convertToUsd(fromToken,amount) / convertToUsd(toToken,1);
+    }
+
+    /**
+     *  @notice convertFromUsd()
+     *          utility function for converting from USD to the specified token,
+     *              ie: how much of the token can the given amount of USD buy
+     *          this function will not accept dsc token, nor is it necessary since dsc is pegged
+     *              1:1 to USD, ie: 1 USD buys 1 DSC.
+     *  @dev    note that the output rounds off to the nearest unit, ie: all decimals are truncated off.
+     *          note also that this conversion is based on prices retrieved at the time of this call.
+     *              this output should not be stored for later use as it may become stale but should
+     *              be requested afresh when needed.
+     */
+    function convertFromUsd(
+        uint256 amountUsd,
+        address toToken
+        ) public view 
+        onlyAllowedTokens(toToken) 
+        returns (uint256) 
+    {
+        if (amountUsd == 0) {
+            return 0;
+        }
+        return amountUsd / convertToUsd(toToken,1);
+    }
+
+    /**
+     *  @notice convertToUsd()
+     *          utility function for converting any given token amount into equivalent USD.
+     *          this function will not accept dsc token, nor is it necessary since dsc is pegged
+     *              1:1 to USD, ie: 1 DSC converts to 1 USD.
+     *  @dev    note that the output rounds off to the nearest dollar, ie: all decimals are truncated off.
+     *          note also that this conversion is based on prices retrieved at the time of this call.
+     *              this output should not be stored for later use as it may become stale but should
+     *              be requested afresh when needed.
+     */
+    function convertToUsd(
+        address token, 
+        uint256 amount) 
+        public view 
+        onlyAllowedTokens(token) 
+        returns (uint256 valueInUsd)
+    {
+        if (amount == 0) {
+            return 0;
+        }
+        // obtain price feed address
+        address priceFeed = s_tokenToPriceFeed[token].priceFeed;
+        // obtain token price from price feed
+        (,int answer,,,) = AggregatorV3Interface(priceFeed).latestRoundData();
+        if (answer <= 0) {
+            revert DSCEngine__DataFeedError(token,priceFeed,answer);
+        }
+        // multiply amount by token price and return value in USD
+        //return uint256(answer) * amount;
+        // Cyfrin Updraft says what Chainlink Data Feed returns is (price * decimal precision)
+        //  where decimal precision is given for each feed under Dec column in price feed page.
+        //  So according to Updraft, correct return value = (uint256(answer) * 1e10 * amount) / 1e18
+        //  Why? Dunno.
+        //  Ok so Updraft made it unnecessarily complicated.
+        //  Basically Chainlink Price Feed returns: int answer = (actual price in USD) * (decimal precision)
+        //  So to obtain value in USD for amountOfTokens:
+        //      (answer * amountOfTokens) / (decimal precision)
+        //  Since this expression must yield an integer, it means that this value is rounded off to 
+        //  the nearest dollar, with the decimal values (ie: cents) being truncated off.
+        uint256 decimalPrecision = 10**(AggregatorV3Interface(priceFeed).decimals());
+        return (uint256(answer) * amount / decimalPrecision);
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -944,15 +947,6 @@ contract DSCEngine is ReentrancyGuard {
      *  This whole section should be removed when from the final deployment/production code.
      */
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    function exposeconvertFromTo(address fromToken,uint256 amount,address toToken) public view returns (uint256) {
-        return convertFromTo(fromToken,amount,toToken);
-    }
-    function exposeconvertFromUsd(uint256 amount,address token) public view returns (uint256) {
-        return convertFromUsd(amount,token);
-    }
-    function exposeconvertToUsd(address token,uint256 amount) public view returns (uint256) {
-        return convertToUsd(token,amount);
-    }
     function exposegetValueOfDepositsInUsd(address user) public view returns (uint256) {
         return getValueOfDepositsInUsd(user);
     }
