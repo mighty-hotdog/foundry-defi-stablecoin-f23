@@ -21,7 +21,7 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Errors *//////////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    error DSCEngine__TokenNotAllowed(address tokenAddress);
+    error DSCEngine__InvalidToken(address tokenAddress);
     error DSCEngine__ThresholdOutOfRange(uint256 threshold);
     error DSCEngine__AmountCannotBeZero();
     error DSCEngine__ConstructorInputParamsMismatch(
@@ -31,13 +31,13 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__TokenAddressCannotBeZero();
     error DSCEngine__PriceFeedAddressCannotBeZero();
     error DSCEngine__PriceFeedPrecisionCannotBeZero();
-    error DSCEngine__DscTokenAddressCannotBeZero();
-    // this error will never hit because ERC20's transfer() and transferFrom() just return true no matter what
+    // this error will never hit because ERC20's transfer() and transferFrom() always return true
     //error DSCEngine__TransferFailed(address from,address to,address collateralTokenAddress,uint256 amount);
     error DSCEngine__RequestedMintAmountBreachesUserMintLimit(
         address user,uint256 requestedMintAmount,uint256 maxSafeMintAmount);
     error DSCEngine__DataFeedError(address tokenAddress, address priceFeedAddress, int answer);
-    error DSCEngine__MintFailed(address toUser,uint256 amountMinted);
+    // this error will never hit because DecentralizedStableCoin's mint() always returns true
+    //error DSCEngine__MintFailed(address toUser,uint256 amountMinted);
     error DSCEngine__OutOfArrayRange(uint256 maxIndex,uint256 requestedIndex);
     error DSCEngine__RequestedBurnAmountExceedsBalance(
         address user,uint256 dscAmountHeldByUser,uint256 requestedBurnAmount);
@@ -106,12 +106,12 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Modifiers *///////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    modifier onlyAllowedTokens(address collateralAddress) {
+    modifier onlyValidTokens(address collateralAddress) {
         if (collateralAddress == address(0)) {
-            revert DSCEngine__TokenAddressCannotBeZero();
+            revert DSCEngine__InvalidToken(address(0));
         }
         if (s_tokenToPriceFeed[collateralAddress].priceFeed == address(0)) {
-            revert DSCEngine__TokenNotAllowed(collateralAddress);
+            revert DSCEngine__InvalidToken(collateralAddress);
         }
         _;
     }
@@ -130,6 +130,7 @@ contract DSCEngine is ReentrancyGuard {
         _;
     }
 
+    /*
     // modifier restricts function caller to:
     //  1. app contracts serving account user
     //  2. account user
@@ -142,6 +143,7 @@ contract DSCEngine is ReentrancyGuard {
     modifier onlyAuthorizedUsers() {
         _;
     }
+    */
 
     modifier withinMintLimitSimple(address user, uint256 requestedMintAmount) {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -186,6 +188,7 @@ contract DSCEngine is ReentrancyGuard {
         _;
     }
 
+    /*
     modifier withinMintLimitReal(address user, uint256 requestedMintAmount) {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Approach 2 - realistic and more flexible
@@ -196,6 +199,7 @@ contract DSCEngine is ReentrancyGuard {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         _;
     }
+    */
 
     modifier sufficientBalance(address user,address token,uint256 amount) {
         if (token == i_dscToken) {
@@ -217,8 +221,8 @@ contract DSCEngine is ReentrancyGuard {
     modifier withinRedeemLimitSimple(address user,address collateral,uint256 requestedRedeemAmount) {
         uint256 valueOfDscMints = getValueOfDscMintsInUsd(user);
         // if valueOfDscMints == 0, ie: no DSC minted, no user debt to system, hence free to redeem 
-        //  any amount even all deposits, therefore just skip all the calcs and continue w/ main 
-        //  function.
+        //  any collateral amount even if cleaning out all deposits, therefore just skip all the 
+        //  calcs here and continue w/ main function.
         if (valueOfDscMints > 0) {
             uint256 valueOfDeposits = getValueOfDepositsInUsd(user);
             uint256 valueOfRequestedRedeemAmount = convertToUsd(collateral,requestedRedeemAmount);
@@ -248,7 +252,7 @@ contract DSCEngine is ReentrancyGuard {
         ) 
     {
         if (dscToken == address(0)) {
-            revert DSCEngine__DscTokenAddressCannotBeZero();
+            revert DSCEngine__TokenAddressCannotBeZero();
         }
         if ((thresholdPercent < 1) || (thresholdPercent > 99)) {
             revert DSCEngine__ThresholdOutOfRange(thresholdPercent);
@@ -287,6 +291,8 @@ contract DSCEngine is ReentrancyGuard {
      *  Each function is meant to be called directly by the user.
      *  As such, they all make use of msg.sender to activate whatever feature/functionality they implement/provide.
      */
+    
+    /*
     function getAccountFullInfo() external {
         // returns:
         //  1. user account status:
@@ -317,6 +323,7 @@ contract DSCEngine is ReentrancyGuard {
         //      c. orange = warning (specific items of concern highlighted)
         //      d. red = suspended (in arrears amount + specific violations highlighted)
     }
+    */
     function getAllDeposits() public view returns (Holding[] memory) {
         // returns all deposits held by user, listed by:
         //      a. token
@@ -339,7 +346,7 @@ contract DSCEngine is ReentrancyGuard {
         }
         return deposits;
     }
-    function getDepositAmount(address token) external view onlyAllowedTokens(token) returns (uint256) {
+    function getDepositAmount(address token) external view onlyValidTokens(token) returns (uint256) {
         return s_userToCollateralDeposits[msg.sender][token];
     }
     function getDepositsValueInUsd() external view returns (uint256) {
@@ -437,7 +444,7 @@ contract DSCEngine is ReentrancyGuard {
         uint256 requestedDepositAmount
         ) public 
         moreThanZero(requestedDepositAmount) 
-        onlyAllowedTokens(collateralTokenAddress) 
+        onlyValidTokens(collateralTokenAddress) 
         nonReentrant 
     {
         // 1st update state and send emits,
@@ -502,10 +509,13 @@ contract DSCEngine is ReentrancyGuard {
         emit DSCMinted(msg.sender,requestedMintAmount);
 
         // then perform actual action to effect the state change
+        DecentralizedStableCoin(i_dscToken).mint(msg.sender, requestedMintAmount);
+        /*
         bool success = DecentralizedStableCoin(i_dscToken).mint(msg.sender, requestedMintAmount);
         if (!success) {
             revert DSCEngine__MintFailed(msg.sender,requestedMintAmount);
         }
+        */
     }
 
     /**
@@ -722,7 +732,7 @@ contract DSCEngine is ReentrancyGuard {
         uint256 requestedRedeemAmount
         ) internal 
         moreThanZero(requestedRedeemAmount) 
-        onlyAllowedTokens(collateralTokenAddress) 
+        onlyValidTokens(collateralTokenAddress) 
         sufficientBalance(from,collateralTokenAddress,requestedRedeemAmount) 
         withinRedeemLimitSimple(from,collateralTokenAddress,requestedRedeemAmount) 
         nonReentrant 
@@ -808,8 +818,8 @@ contract DSCEngine is ReentrancyGuard {
         uint256 amount,
         address toToken
         ) public view 
-        onlyAllowedTokens(fromToken) 
-        onlyAllowedTokens(toToken) 
+        onlyValidTokens(fromToken) 
+        onlyValidTokens(toToken) 
         returns (uint256) 
     {
         if (amount == 0) {
@@ -833,7 +843,7 @@ contract DSCEngine is ReentrancyGuard {
         uint256 amountUsd,
         address toToken
         ) public view 
-        onlyAllowedTokens(toToken) 
+        onlyValidTokens(toToken) 
         returns (uint256) 
     {
         if (amountUsd == 0) {
@@ -856,7 +866,7 @@ contract DSCEngine is ReentrancyGuard {
         address token, 
         uint256 amount) 
         public view 
-        onlyAllowedTokens(token) 
+        onlyValidTokens(token) 
         returns (uint256 valueInUsd)
     {
         if (amount == 0) {
@@ -924,14 +934,14 @@ contract DSCEngine is ReentrancyGuard {
         }
         return s_allowedCollateralTokens[index];
     }
-    function getPriceFeed(address token) external view onlyAllowedTokens(token) returns (address,uint256) {
+    function getPriceFeed(address token) external view onlyValidTokens(token) returns (address,uint256) {
         return (s_tokenToPriceFeed[token].priceFeed,s_tokenToPriceFeed[token].precision);
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // Exposing these 2 functions to externals is a bad idea. Users' privacy should be protected.
     /*
-    function getDepositHeld(address user,address token) external view onlyAllowedTokens(token) returns (uint256) {
+    function getDepositHeld(address user,address token) external view onlyValidTokens(token) returns (uint256) {
         return s_userToCollateralDeposits[user][token];
     }
     function getMintHeld(address user) external view returns (uint256) {

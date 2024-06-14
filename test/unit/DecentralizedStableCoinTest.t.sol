@@ -9,154 +9,160 @@ import {DeployDecentralizedStableCoin} from "../../script/DeployDecentralizedSta
 contract DecentralizedStableCoinTest is Test {
     /* State Variables */
     DecentralizedStableCoin public coin;
+    address public owner;
 
     /* Setup Functions */
     function setUp() external {
         DeployDecentralizedStableCoin deployer = new DeployDecentralizedStableCoin();
         coin = deployer.run();
+        owner = coin.owner();
     }
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for constructor()
     ////////////////////////////////////////////////////////////////////
     function testInitialOwnerSetCorrectly() external view {
-        assert(coin.owner() == address(this));
+        assert(owner == address(this));
     }
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for transferOwnership()
     ////////////////////////////////////////////////////////////////////
-    function testTransferOwnershipRequestFromNonOwner() external {
-        address NOTOWNER = makeAddr("not owner");
-        address NEWOWNER = makeAddr("newowner");
-        // set up expectRevert() to take an error with parameters by:
-        //  1. creating the selector
-        // no need for the Ownable prefix, not sure why..
-        //bytes4 selector = bytes4(keccak256("Ownable.OwnableUnauthorizedAccount(address)"));
-        bytes4 selector = bytes4(keccak256("OwnableUnauthorizedAccount(address)"));
-        //  2. abi encode selector with expected parameters
-        bytes memory expectedError = abi.encodeWithSelector(selector,NOTOWNER);
-        vm.prank(NOTOWNER);
-        //  3. apply in vm.expectRevert() like other errors
-        vm.expectRevert(expectedError);
-        coin.transferOwnership(NEWOWNER);
+    function testTransferOwnershipRequestFromNonOwner(address requestor,address newOwner) external {
+        vm.assume(requestor != address(0));
+        vm.assume(requestor != owner);
+        vm.assume(newOwner != address(0));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(bytes4(keccak256("OwnableUnauthorizedAccount(address)")),
+            requestor));
+        vm.prank(requestor);
+        coin.transferOwnership(newOwner);
     }
-    function testTransferOwnershipPerformedCorrectly() external {
-        address NEWOWNER = makeAddr("new owner");
-        assert(coin.owner() != NEWOWNER);
-        vm.prank(coin.owner());
-        coin.transferOwnership(NEWOWNER);
-        assert(coin.owner() == NEWOWNER);
+    function testTransferOwnershipPerformedCorrectly(address newOwner) external {
+        vm.assume(newOwner != address(0));
+        vm.assume(newOwner != owner);
+
+        address oldOwner = coin.owner();
+        vm.prank(owner);
+        coin.transferOwnership(newOwner);
+        assertNotEq(coin.owner(),oldOwner);
+        assertEq(coin.owner(),newOwner);
     }
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for mint()
     ////////////////////////////////////////////////////////////////////
-    function testMintRequestFromNonOwner() external {
-        address NOTOWNER = makeAddr("not owner");
-        address USER = makeAddr("user");
-        uint256 mintAmount = 1e5;
-        vm.prank(NOTOWNER);
+    function testMintRequestFromNonOwner(address requestor,address to,uint256 mintAmount) external {
+        vm.assume(requestor != address(0));
+        vm.assume(requestor != owner);
+        vm.assume(to != address(0));
+        mintAmount = bound(mintAmount,1,type(uint256).max);
+        vm.prank(requestor);
         vm.expectRevert(
             abi.encodeWithSelector(
                 bytes4(keccak256("OwnableUnauthorizedAccount(address)")),
-                NOTOWNER));
-        coin.mint(USER,mintAmount);
+                requestor));
+        coin.mint(to,mintAmount);
     }
-    function testMintToZeroAddress() external {
-        uint256 mintAmount = 1e5;   // 100,000 tokens
-        vm.prank(coin.owner());
-        vm.expectRevert(DecentralizedStableCoin.DecentralizedStableCoin__ReceiverAddressCannotBeZero.selector);
+    function testMintToZeroAddress(uint256 mintAmount) external {
+        mintAmount = bound(mintAmount,1,type(uint256).max);
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(bytes4(keccak256("ERC20InvalidReceiver(address)")),
+            address(0)));
         coin.mint(address(0),mintAmount);
     }
-    function testMintAmountZero() external {
-        address USER = makeAddr("user");
-        vm.prank(coin.owner());
-        vm.expectRevert(DecentralizedStableCoin.DecentralizedStableCoin__AmountMustBeMoreThanZero.selector);
-        coin.mint(USER,0);
+    function testMintAmountZero(address to) external {
+        vm.assume(to != address(0));
+        vm.prank(owner);
+        vm.expectRevert(DecentralizedStableCoin.DecentralizedStableCoin__AmountCannotBeZero.selector);
+        coin.mint(to,0);
     }
-    function testTotalSupplyAfterMint(uint256 mintAmount) external {
-        mintAmount = bound(mintAmount, 1, type(uint256).max);
-        address USER = makeAddr("user");
-        assertEq(coin.totalSupply(),0);
-        vm.prank(coin.owner());
-        coin.mint(USER,mintAmount);
-        assertEq(coin.totalSupply(),mintAmount);
-    }
-    function testBalanceOfUserAfterMint(uint256 mintAmount) external {
-        mintAmount = bound(mintAmount, 1, type(uint256).max);
-        address USER = makeAddr("user");
-        assertEq(coin.balanceOf(USER),0);
-        vm.prank(coin.owner());
-        coin.mint(USER,mintAmount);
-        assertEq(coin.balanceOf(USER),mintAmount);
-    }
-    function testExpectEmitTokenMinted(uint256 mintAmount) external {
-        mintAmount = bound(mintAmount, 1, type(uint256).max);
-        address USER = makeAddr("user");
-        vm.expectEmit(true,true,false,false,address(coin));
-        emit DecentralizedStableCoin.TokenMinted(USER,mintAmount);
-        vm.prank(coin.owner());
-        coin.mint(USER,mintAmount);
+    function testMintStateCorrectlyUpdated(address to,uint256 mintAmount) external {
+        vm.assume(to != address(0));
+        mintAmount = bound(mintAmount,1,type(uint256).max);
+
+        // collect all pre-mint values
+        uint256 userBalanceBeforeMint = coin.balanceOf(to);
+        uint256 coinTotalSupplyBeforeMint = coin.totalSupply();
+
+        // perform mint and do the tests
+        vm.startPrank(owner);
+        //  check for emit
+        vm.expectEmit(true,false,false,false,address(coin));
+        emit DecentralizedStableCoin.TokenMinted(to,mintAmount);
+        coin.mint(to,mintAmount);
+        //  check user balance correctly increased
+        assertEq(coin.balanceOf(to),userBalanceBeforeMint+mintAmount);
+        //  check coin total supply correctly increased
+        assertEq(coin.totalSupply(),coinTotalSupplyBeforeMint+mintAmount);
     }
     ////////////////////////////////////////////////////////////////////
     // Unit tests for burn()
     ////////////////////////////////////////////////////////////////////
-    function testBurnRequestFromNonOwner() external {
-        address NOTOWNER = makeAddr("not owner");
-        uint256 burnAmount = 1e9;   // 1 billion tokens
-        vm.prank(NOTOWNER);
+    function testBurnRequestFromNonOwner(address requestor,uint256 burnAmount) external {
+        vm.assume(requestor != address(0));
+        vm.assume(requestor != coin.owner());
+        burnAmount = bound(burnAmount,1,type(uint256).max);
+        /*
+        // using bounds to retrict fuzz inputs seems to result in more "valid" runs than using vm.assume()
+        //vm.assume(burnAmount > 0);
+        */
+        vm.prank(requestor);
         vm.expectRevert(
             abi.encodeWithSelector(
                 bytes4(keccak256("OwnableUnauthorizedAccount(address)")),
-                NOTOWNER));
+                requestor));
         coin.burn(burnAmount);
     }
     function testBurnAmountZero() external {
-        vm.prank(coin.owner());
-        vm.expectRevert(DecentralizedStableCoin.DecentralizedStableCoin__AmountMustBeMoreThanZero.selector);
+        vm.prank(owner);
+        vm.expectRevert(DecentralizedStableCoin.DecentralizedStableCoin__AmountCannotBeZero.selector);
         coin.burn(0);
     }
-    function testTotalSupplyAfterBurn(uint256 initialSupply,uint256 burnAmount) external {
-        initialSupply = bound(initialSupply,1,type(uint256).max);
-        burnAmount = bound(burnAmount,1,initialSupply);
-        vm.prank(coin.owner());
-        coin.mint(coin.owner(),initialSupply);
-        uint256 totalSupplyBeforeBurn = coin.totalSupply();
-        vm.prank(coin.owner());
-        coin.burn(burnAmount);
-        assertEq(coin.totalSupply(),(totalSupplyBeforeBurn - burnAmount));
-    }
-    function testBalanceOfOwnerAfterBurn(uint256 initialSupply,uint256 burnAmount) external {
-        initialSupply = bound(initialSupply,1,type(uint256).max);
-        burnAmount = bound(burnAmount,1,initialSupply);
-        vm.prank(coin.owner());
-        coin.mint(coin.owner(),initialSupply);
-        uint256 balanceOfOwnerBeforeBurn = coin.balanceOf(coin.owner());
-        vm.prank(coin.owner());
-        coin.burn(burnAmount);
-        assertEq(coin.balanceOf(coin.owner()),(balanceOfOwnerBeforeBurn - burnAmount));
-    }
-    function testBurnAmountExceedsBalance() external {
-        uint256 mintAmount = 1e9;   // 1 billion tokens
-        vm.prank(coin.owner());
-        coin.mint(coin.owner(),mintAmount);
-        uint256 balanceOfUser = coin.balanceOf(coin.owner());
-        console.log("balanceOfUser: ",balanceOfUser);
-        uint256 burnAmount = 2e9;   // 2 billion tokens
-        console.log("burnAmount: ",burnAmount);
-        vm.prank(coin.owner());
-        vm.expectRevert(DecentralizedStableCoin.DecentralizedStableCoin__BurnAmountExceedsBalance.selector);
+    function testBurnAmountExceedsBalance(uint256 burnAmount,uint256 mintAmount) external {
+        burnAmount = bound(burnAmount,2,type(uint256).max);
+        mintAmount = bound(mintAmount,1,burnAmount-1);
+        /*
+        // using bounds to retrict fuzz inputs seems to result in more "valid" runs than using vm.assume()
+        vm.assume(burnAmount > 0);
+        vm.assume(mintAmount < burnAmount);
+        vm.assume(mintAmount > 0);
+        */
+        // only the owner can call mint()
+        vm.prank(owner);
+        // mint coins to owner
+        coin.mint(owner,mintAmount);
+        // call burn() and check for revert
+        vm.expectRevert(
+            abi.encodeWithSelector(bytes4(keccak256("ERC20InsufficientBalance(address,uint256,uint256)")),
+            owner,
+            coin.balanceOf(owner),
+            burnAmount));
+        // only the owner can call burn()
+        vm.prank(owner);
         coin.burn(burnAmount);
     }
-    function testExpectEmitTokenBurned(uint256 initialSupply,uint256 burnAmount) external {
-        initialSupply = bound(initialSupply,1,type(uint256).max);
-        burnAmount = bound(burnAmount,1,initialSupply);
-        vm.prank(coin.owner());
-        coin.mint(coin.owner(),initialSupply);
+    function testBurnStateCorrectlyUpdated(uint256 burnAmount,uint256 mintAmount) external {
+        mintAmount = bound(mintAmount,1,type(uint256).max);
+        burnAmount = bound(burnAmount,1,mintAmount);
+        vm.prank(owner);
+        coin.mint(owner,mintAmount);
+
+        // collect all pre-burn values
+        uint256 userBalanceBeforeBurn = coin.balanceOf(owner);
+        uint256 coinTotalSupplyBeforeBurn = coin.totalSupply();
+        // perform the burn and do the tests
+        vm.startPrank(owner);
+        //  check for emit
         vm.expectEmit(true,true,false,false,address(coin));
-        emit DecentralizedStableCoin.TokenBurned(coin.owner(),burnAmount);
-        vm.prank(coin.owner());
+        emit DecentralizedStableCoin.TokenBurned(owner,burnAmount);
         coin.burn(burnAmount);
+        vm.stopPrank();
+        //  check owner balance drawn down correctly
+        assertEq(coin.balanceOf(owner),userBalanceBeforeBurn-burnAmount);
+        //  check token total supply drawn down correctly
+        assertEq(coin.totalSupply(),coinTotalSupplyBeforeBurn-burnAmount);
     }
 }
