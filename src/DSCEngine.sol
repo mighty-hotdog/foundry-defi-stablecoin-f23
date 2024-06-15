@@ -45,7 +45,7 @@ contract DSCEngine is ReentrancyGuard {
         address user,address requestedRedeemCollateral,uint256 collateralHeldAmount,uint256 requestedRedeemAmount);
     error DSCEngine__RequestedRedeemAmountBreachesUserRedeemLimit(
         address user,address requestedRedeemCollateral,uint256 requestedRedeemAmount,uint256 maxSafeRedeemAmount);
-    error DSCEngine__UserCannotBeZero();
+    error DSCEngine__InvalidUser();
     error DSCEngine__MintsCannotBeZero();
     error DSCEngine__DepositsCannotBeZero();
     error DSCEngine__CannotBeLiquidated(address user);
@@ -119,13 +119,6 @@ contract DSCEngine is ReentrancyGuard {
     modifier moreThanZero(uint256 amount) {
         if (amount <= 0) {
             revert DSCEngine__AmountCannotBeZero();
-        }
-        _;
-    }
-
-    modifier nonZeroUser(address user) {
-        if (user == address(0)) {
-            revert DSCEngine__UserCannotBeZero();
         }
         _;
     }
@@ -327,9 +320,10 @@ contract DSCEngine is ReentrancyGuard {
     function getAllDeposits() public view returns (Holding[] memory) {
         // returns all deposits held by user, listed by:
         //      a. token
-        //      b. amount
-        //      c. current price
-        //      d. current value in usd
+        //      b. isCollateral
+        //      c. amount
+        //      d. current price
+        //      e. current value in usd
         Holding[] memory deposits = new Holding[](s_allowedCollateralTokens.length);
         for(uint256 i=0;i<s_allowedCollateralTokens.length;i++) {
             address collateral = s_allowedCollateralTokens[i];
@@ -548,6 +542,7 @@ contract DSCEngine is ReentrancyGuard {
      *              2. redemption is in allowed tokens
      *              3. sufficient balance exists in collateral held
      *              4. user's redeem limit is not breached with this redemption request
+     *              plus the usual sanity checks on addresses, etc
      *          all implementation logic in constituent function _redeemCollateral():
      *              1. record redemption (ie: change internal state)
      *              2. emit event
@@ -565,6 +560,7 @@ contract DSCEngine is ReentrancyGuard {
      *  @dev    all checks are performed in the constituent function _burnDSC():
      *              1. burn amount is more than zero
      *              2. sufficient balance exists in user account
+     *              plus the usual sanity checks on addresses, etc
      *          all implementation logic in constituent function _burnDSC():
      *              1. record burn (ie: pay down user debt)
      *              2. emit event
@@ -576,7 +572,7 @@ contract DSCEngine is ReentrancyGuard {
         _burnDSC(msg.sender,msg.sender,requestedBurnAmount);
     }
 
-    function liquidate(address userToLiquidate) external nonReentrant nonZeroUser(userToLiquidate) {
+    function liquidate(address userToLiquidate) external nonReentrant {
         // Question: What is liquidation?
         // Answer: Paying off a user's debt (minted dsc tokens in this case) and receiving the value of 
         //  his deposits backing that debt.
@@ -632,15 +628,22 @@ contract DSCEngine is ReentrancyGuard {
         //          b. collateral deposits is also zeroed
         
         // all checks //////////////////////////////////////////////////////////////
-        uint256 valueOfDscMints = getValueOfDscMintsInUsd(userToLiquidate);
-        if (valueOfDscMints == 0) {
-            revert DSCEngine__MintsCannotBeZero();
+        if ((userToLiquidate == address(0)) || 
+            (userToLiquidate == DecentralizedStableCoin(i_dscToken).owner()) || // cant liquidate DSC owner
+            (userToLiquidate == address(this)) ||   // cant liquidate engine
+            (userToLiquidate == msg.sender)) {  // cant liquidate self
+            revert DSCEngine__InvalidUser();
         }
         uint256 valueOfDeposits = getValueOfDepositsInUsd(userToLiquidate);
         if (valueOfDeposits == 0) {
             revert DSCEngine__DepositsCannotBeZero();
         }
+        uint256 valueOfDscMints = getValueOfDscMintsInUsd(userToLiquidate);
+        if (valueOfDscMints == 0) {
+            revert DSCEngine__MintsCannotBeZero();
+        }
         uint256 liquidatorDscBalance = DecentralizedStableCoin(i_dscToken).balanceOf(msg.sender);
+        // direct comparison of balance vs value ok because DSC is 1:1 to USD
         if (liquidatorDscBalance < valueOfDscMints) {
             revert DSCEngine__UserDebtExceedsLiquidatorBalance(valueOfDscMints,liquidatorDscBalance);
         }
@@ -678,9 +681,12 @@ contract DSCEngine is ReentrancyGuard {
      *          note also that this conversion is based on prices retrieved at the time of this call.
      *              this output should not be stored for later use as it may become stale but should
      *              be requested afresh when needed.
+     *  @dev    returns 0 for a zero address user
      */
     function getValueOfDepositsInUsd(address user) internal view returns (uint256 valueInUsd) 
     {
+        // zero address user has no deposits with the system
+        if (user == address(0)) {return 0;}
         // loop through all allowed collateral tokens
         for(uint256 i=0;i<s_allowedCollateralTokens.length;i++) {
             // obtain deposit amount held by user in each collateral token
@@ -698,11 +704,10 @@ contract DSCEngine is ReentrancyGuard {
      *          utility function for retrieving the total value in USD of all minted DSC tokens held by a 
      *              given user.
      *          to protect the privacy of the user, this function is internal and view only.
-     *          since DSC token is pegged 1:1 to USD, so the output is basically the amount of minted DSC 
-     *              held by the user.
+     *  @dev    value of mints == amount of mints because DSC is 1:1 to USD
+     *  @dev    returns 0 for a zero address user, ie: zero address user has no mints/debts in the system
      */
     function getValueOfDscMintsInUsd(address user) internal view returns (uint256 valueInUsd) {
-        // since DSC token is USD-pegged 1:1, no extra logic needed to convert DSC token amount to its equivalent USD value
         return s_userToDscMints[user];
     }
 

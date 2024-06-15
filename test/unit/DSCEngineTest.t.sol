@@ -18,14 +18,18 @@ contract DSCEngineTest is Test {
     ChainConfigurator public config;
     address public USER;
 
-    //////////////////////////////////////////////////////////////////
-    // All events emitted by DSCEngine contract and to be tested for
-    // NO NEED TO REDEFINE EVENTS OR ERRORS HERE
-    // just call with <contract address>.<event or error name>
-    //////////////////////////////////////////////////////////////////
-    //event CollateralDeposited(address indexed user,address indexed collateralTokenAddress,uint256 indexed amount);
-    //event DSCMinted(address indexed toUser,uint256 indexed amount);
-    //////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////
+    // mechanism to check if test functions run to completion//////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////
+    // unfortunately this works only for non-fuzz tests, which renders it useless for
+    //  most tests
+    /*
+    uint256 public toTheEndTestCounts;
+    bool public completion; // set this to true in setUp() to begin
+    // include following line in an appropriate place near the end of a test function
+    //  if (completion) {console.log("toTheEndTestCounts: ",++toTheEndTestCounts);}
+    */
+    ///////////////////////////////////////////////////////////////////////////////////
 
     /* Modifiers */
     modifier skipIfNotOnAnvil() {
@@ -34,6 +38,13 @@ contract DSCEngineTest is Test {
         }
         _;
     }
+    /*
+    modifier toTheEnd() {
+        _;
+        ++toTheEndTestCounts;
+        console.log("toTheEndTestCounts: ",toTheEndTestCounts);
+    }
+    */
 
     /* Setup Function */
     function setUp() external {
@@ -212,6 +223,7 @@ contract DSCEngineTest is Test {
         assertEq(wethDeposit,engine.getDepositAmount(weth));
         // wbtc test
         assertEq(wbtcDeposit,engine.getDepositAmount(wbtc));
+        vm.stopPrank();
     }
 
     ////////////////////////////////////////////////////////////////////
@@ -352,6 +364,104 @@ contract DSCEngineTest is Test {
     ////////////////////////////////////////////////////////////////////
     // Unit tests for depositCollateralMintDSC()
     ////////////////////////////////////////////////////////////////////
+    function testDepositCollateralMintDSCWeth(uint256 depositAmount,uint256 mintAmount) external
+    {
+        (address token,,,,,) = config.s_activeChainConfig();
+        (uint256 depositAmountReturn,uint256 mintAmountReturn) = SetupTestDepositCollateralMintDSC(
+            token,
+            depositAmount,
+            mintAmount);
+        // collect the initial values
+        vm.startPrank(USER);
+        uint256 userCollateralBalanceBefore = ERC20Mock(token).balanceOf(USER);
+        uint256 userDepositBefore = engine.getDepositAmount(token);
+        uint256 userDSCBalanceBefore = coin.balanceOf(USER);
+        uint256 userMintBefore = engine.getMints();
+        uint256 engineCollateralBalanceBefore = ERC20Mock(token).balanceOf(address(engine));
+        uint256 dscTotalSupplyBefore = coin.totalSupply();
+        // check initial values
+        assertEq(userCollateralBalanceBefore,depositAmountReturn);
+        assertEq(userDepositBefore,0);
+        assertEq(userDSCBalanceBefore,0);
+        assertEq(userMintBefore,0);
+        assertEq(engineCollateralBalanceBefore,0);
+        assertEq(dscTotalSupplyBefore,0);
+        vm.stopPrank();
+
+        // perform the deposit and mint
+        vm.prank(USER);
+        engine.depositCollateralMintDSC(token,depositAmountReturn,mintAmountReturn);
+
+        // do the tests
+        vm.startPrank(USER);
+        assertEq(ERC20Mock(token).balanceOf(USER),userCollateralBalanceBefore-depositAmountReturn);
+        assertEq(engine.getDepositAmount(token),userDepositBefore+depositAmountReturn);
+        assertEq(coin.balanceOf(USER),userDSCBalanceBefore+mintAmountReturn);
+        assertEq(engine.getMints(),userMintBefore+mintAmountReturn);
+        assertEq(ERC20Mock(token).balanceOf(address(engine)),engineCollateralBalanceBefore+depositAmountReturn);
+        assertEq(coin.totalSupply(),dscTotalSupplyBefore+mintAmountReturn);
+        vm.stopPrank();
+    }
+    function testDepositCollateralMintDSCWbtc(uint256 depositAmount,uint256 mintAmount) external
+    {
+        (,address token,,,,) = config.s_activeChainConfig();
+        (uint256 depositAmountReturn,uint256 mintAmountReturn) = SetupTestDepositCollateralMintDSC(
+            token,
+            depositAmount,
+            mintAmount);
+        // collect the initial values
+        vm.startPrank(USER);
+        uint256 userCollateralBalanceBefore = ERC20Mock(token).balanceOf(USER);
+        uint256 userDepositBefore = engine.getDepositAmount(token);
+        uint256 userDSCBalanceBefore = coin.balanceOf(USER);
+        uint256 userMintBefore = engine.getMints();
+        uint256 engineCollateralBalanceBefore = ERC20Mock(token).balanceOf(address(engine));
+        uint256 dscTotalSupplyBefore = coin.totalSupply();
+        // check initial values
+        assertEq(userCollateralBalanceBefore,depositAmountReturn);
+        assertEq(userDepositBefore,0);
+        assertEq(userDSCBalanceBefore,0);
+        assertEq(userMintBefore,0);
+        assertEq(engineCollateralBalanceBefore,0);
+        assertEq(dscTotalSupplyBefore,0);
+        vm.stopPrank();
+
+        // perform the deposit and mint
+        vm.prank(USER);
+        engine.depositCollateralMintDSC(token,depositAmountReturn,mintAmountReturn);
+
+        // do the tests
+        vm.startPrank(USER);
+        assertEq(ERC20Mock(token).balanceOf(USER),userCollateralBalanceBefore-depositAmountReturn);
+        assertEq(engine.getDepositAmount(token),userDepositBefore+depositAmountReturn);
+        assertEq(coin.balanceOf(USER),userDSCBalanceBefore+mintAmountReturn);
+        assertEq(engine.getMints(),userMintBefore+mintAmountReturn);
+        assertEq(ERC20Mock(token).balanceOf(address(engine)),engineCollateralBalanceBefore+depositAmountReturn);
+        assertEq(coin.totalSupply(),dscTotalSupplyBefore+mintAmountReturn);
+        vm.stopPrank();
+    }
+    function SetupTestDepositCollateralMintDSC(
+        address token,
+        uint256 depositAmount,
+        uint256 mintAmount) internal returns (uint256 depositAmountReturn,uint256 mintAmountReturn)
+    {
+        uint256 maxDepositAmount = 1e9; // 1 billion collateral tokens
+        depositAmount = bound(depositAmount,1,maxDepositAmount);
+        // deposits value * threshold / fractional = max mint value
+        //  note that since DSC is 1:1 to USD, mint value == mint amount
+        uint256 threshold = engine.getThresholdLimitPercent();
+        uint256 fractional = engine.getFractionRemovalMultiplier();
+        uint256 depositValue = engine.convertToUsd(token,depositAmount);
+        uint256 maxMintAmount = depositValue * threshold / fractional;
+        mintAmount = bound(mintAmount,1,maxMintAmount);
+
+        // setup needed prerequisite collateral mints and approvals
+        ERC20Mock(token).mint(USER,depositAmount);
+        vm.prank(USER);
+        ERC20Mock(token).approve(address(engine),depositAmount);
+
+        return (depositAmount,mintAmount);
+    }
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for depositCollateral()
@@ -637,47 +747,49 @@ contract DSCEngineTest is Test {
     ////////////////////////////////////////////////////////////////////
     // Unit tests for burnDSCRedeemCollateral()
     ////////////////////////////////////////////////////////////////////
-    /*
-    // code causes compiler error: stack too deep
-    //  dunno how to fix
-    //  tried splitting logic into different functions
-    //  doesn't work, the compile error just points to 
-    //  a different line
     function testBurnDSCRedeemCollateralWeth(
         uint256 burnAmount,
         uint256 redeemAmount,
         uint256 depositAmount,
-        uint256 mintAmount) external skipIfNotOnAnvil
+        uint256 mintAmount) internal 
     {
-        (address token,,,,,) = config.s_activeChainConfig();
-        BurnDSCRedeemCollateral(
-            burnAmount,
-            token,
-            redeemAmount,
-            depositAmount,
-            mintAmount);
+        (address token,,,,,) = config.s_activeChainConfig();        
+        (uint256 burnAmountReturn,uint256 redeemAmountReturn) = 
+            SetupBurnDSCRedeemCollateral(
+                burnAmount,
+                token,
+                redeemAmount,
+                depositAmount,
+                mintAmount);
+        // collect initial values
+        vm.startPrank(USER);
+        uint256 mintsBefore = engine.getMints();
+        uint256 depositsBefore = engine.getDepositAmount(token);
+        vm.stopPrank();
+        uint256 userDscBalanceBefore = coin.balanceOf(USER);
+        uint256 dscTotalSupplyBefore = coin.totalSupply();
+        uint256 userCollateralTokenBalanceBefore = ERC20Mock(token).balanceOf(USER);
+        uint256 engineCollateralTokenBalanceBefore = ERC20Mock(token).balanceOf(address(engine));
+        // perform burn and redeem
+        vm.startPrank(USER);
+        engine.burnDSCRedeemCollateral(burnAmountReturn,token,redeemAmountReturn);
+        // burn tests
+        assertEq(engine.getMints(),mintsBefore-burnAmountReturn);
+        assertEq(coin.balanceOf(USER),userDscBalanceBefore-burnAmountReturn);
+        assertEq(coin.totalSupply(),dscTotalSupplyBefore-burnAmountReturn);
+        // redeem tests
+        assertEq(engine.getDepositAmount(token),depositsBefore-redeemAmountReturn);
+        assertEq(ERC20Mock(token).balanceOf(USER),userCollateralTokenBalanceBefore+redeemAmountReturn);
+        assertEq(ERC20Mock(token).balanceOf(address(engine)),engineCollateralTokenBalanceBefore-redeemAmountReturn);
+        vm.stopPrank();
     }
     function testBurnDSCRedeemCollateralWbtc(
         uint256 burnAmount,
         uint256 redeemAmount,
         uint256 depositAmount,
-        uint256 mintAmount) external skipIfNotOnAnvil
-    {
-        (,address token,,,,) = config.s_activeChainConfig();
-        BurnDSCRedeemCollateral(
-            burnAmount,
-            token,
-            redeemAmount,
-            depositAmount,
-            mintAmount);
-    }
-    function BurnDSCRedeemCollateral(
-        uint256 burnAmount,
-        address token,
-        uint256 redeemAmount,
-        uint256 depositAmount,
         uint256 mintAmount) internal 
     {
+        (,address token,,,,) = config.s_activeChainConfig();        
         (uint256 burnAmountReturn,uint256 redeemAmountReturn) = 
             SetupBurnDSCRedeemCollateral(
                 burnAmount,
@@ -742,7 +854,6 @@ contract DSCEngineTest is Test {
 
         return (burnAmount,redeemAmount);
     }
-    */
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for redeemCollateral()
@@ -1099,11 +1210,116 @@ contract DSCEngineTest is Test {
     ////////////////////////////////////////////////////////////////////
     // Unit tests for liquidate()
     ////////////////////////////////////////////////////////////////////
+    function testLiquidateZeroUser() external {
+        vm.expectRevert(DSCEngine.DSCEngine__InvalidUser.selector);
+        engine.liquidate(address(0));
+    }
+    function testLiquidateDSCOwner() external {
+        address owner = coin.owner();
+        vm.expectRevert(DSCEngine.DSCEngine__InvalidUser.selector);
+        engine.liquidate(owner);
+    }
+    function testLiquidateDSCEngine() external {
+        vm.expectRevert(DSCEngine.DSCEngine__InvalidUser.selector);
+        engine.liquidate(address(engine));
+    }
+    function testLiquidateSelf(address user) external {
+        vm.assume(user != address(0));
+        vm.assume(user != address(engine));
+        assertEq(address(engine),coin.owner());
+
+        vm.prank(user);
+        vm.expectRevert(DSCEngine.DSCEngine__InvalidUser.selector);
+        engine.liquidate(user);
+    }
+    function testLiquidateDepositsZero(address user) external {
+        vm.assume(user != address(0));
+        vm.assume(user != address(engine));
+        assertEq(address(engine),coin.owner());
+        vm.assume(user != USER);    // USER is the liquidator who calls liquidate()
+
+        vm.startPrank(user);
+        assertEq(engine.getDepositsValueInUsd(),0);
+        vm.stopPrank();
+
+        vm.startPrank(USER);
+        vm.expectRevert(DSCEngine.DSCEngine__DepositsCannotBeZero.selector);
+        engine.liquidate(user);
+        vm.stopPrank();
+    }
+    function testLiquidateMintsZero(
+        address user,
+        uint256 depositAmount,
+        uint256 tokenSeed
+        ) external skipIfNotOnAnvil 
+    {
+        vm.assume(user != address(0));
+        vm.assume(user != address(engine));
+        assertEq(address(engine),coin.owner());
+        vm.assume(user != USER);    // USER is the liquidator who calls liquidate()
+        uint256 maxDepositAmount = 1e9; // 1 billion collateral tokens
+        depositAmount = bound(depositAmount,1,maxDepositAmount);
+        address token;
+        if (tokenSeed % 2 == 0) {(token,,,,,) = config.s_activeChainConfig();} 
+        else {(,token,,,,) = config.s_activeChainConfig();}
+
+        ERC20Mock(token).mint(user,depositAmount);
+        vm.startPrank(user);
+        ERC20Mock(token).approve(address(engine),depositAmount);
+        engine.depositCollateral(token,depositAmount);
+        assert(engine.getDepositsValueInUsd() > 0);
+        assertEq(engine.getMints(),0);
+        vm.stopPrank();
+
+        vm.prank(USER);
+        vm.expectRevert(DSCEngine.DSCEngine__MintsCannotBeZero.selector);
+        engine.liquidate(user);
+    }
+    function testLiquidateUserDebtExceedsLiquidatorBalance(
+        address liquidateTarget,
+        uint256 depositAmount,
+        uint256 mintAmount
+        ) external skipIfNotOnAnvil
+    {
+        (address token,,,,,) = config.s_activeChainConfig();
+        vm.assume(liquidateTarget != address(0));
+        vm.assume(liquidateTarget != address(engine));
+        assertEq(address(engine),coin.owner());
+        vm.assume(liquidateTarget != USER); // USER is the liquidator who calls liquidate()
+        uint256 maxDepositAmount = 1e9; // 1 billion collateral tokens
+        depositAmount = bound(depositAmount,1,maxDepositAmount);
+        uint256 threshold = engine.getThresholdLimitPercent();
+        uint256 fractional = engine.getFractionRemovalMultiplier();
+        uint256 valueOfDeposits = engine.convertToUsd(token,depositAmount);
+        uint256 maxMintAmount = valueOfDeposits * threshold / fractional;
+        mintAmount = bound(mintAmount,1,maxMintAmount);
+
+        ERC20Mock(token).mint(liquidateTarget,depositAmount);
+        vm.startPrank(liquidateTarget);
+        ERC20Mock(token).approve(address(engine),depositAmount);
+        engine.depositCollateralMintDSC(token,depositAmount,mintAmount);
+        vm.stopPrank();
+        // note that USER is the liquidator calling liquidate()
+        assertEq(coin.balanceOf(USER),0);
+
+        vm.startPrank(USER);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(
+                    keccak256("DSCEngine__UserDebtExceedsLiquidatorBalance(uint256,uint256)")),
+            mintAmount,
+            0));
+        engine.liquidate(liquidateTarget);
+    }
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for getValueOfDepositsInUsd()
     ////////////////////////////////////////////////////////////////////
-    function testValueOfDepositsIsCorrect(address user,uint256 randomDepositAmount) external skipIfNotOnAnvil {
+    function testValueOfDepositsIsCorrect(
+        address user,
+        uint256 randomDepositAmount
+        ) external skipIfNotOnAnvil 
+    {
         // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
         //  contracts on the Sepolia or Mainnet, hence this call doesn't work on those chains 
         //  and we have no way to mint the user some WETH/WBTC for the deposit call.
