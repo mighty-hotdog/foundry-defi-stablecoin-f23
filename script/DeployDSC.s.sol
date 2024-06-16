@@ -12,7 +12,12 @@ contract DeployDSC is Script {
     DSCEngine public engine;
     ChainConfigurator public config;
 
-    function run() external returns (address _coin,address _engine,address _config) {
+    function run() external 
+        returns (
+            DecentralizedStableCoin,
+            DSCEngine,
+            ChainConfigurator) 
+    {
         // All deployments to be done by a single deployer account
         //  which will initiate and sign all the necessary transactions.
         //vm.startBroadcast();
@@ -44,6 +49,6 @@ contract DeployDSC is Script {
         coin.transferOwnership(address(engine));
         vm.stopBroadcast();
 
-        return (address(coin),address(engine),address(config));
+        return (coin,engine,config);
     }
 }

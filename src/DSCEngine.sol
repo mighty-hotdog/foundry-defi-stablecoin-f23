@@ -58,7 +58,6 @@ contract DSCEngine is ReentrancyGuard {
         address priceFeed;
         uint256 precision;
     }
-
     // a Holding defines a single record of a token deposit or mint
     struct Holding {
         address token;
@@ -71,11 +70,29 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* State Variables - Generics *//////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    uint256 private constant FRACTION_REMOVAL_MULTIPLIER = 100;
-    address private immutable i_dscToken;   // contract address for the DSC token
-    uint256 private immutable i_thresholdLimitPercent;  // the single threshold limit to be applied to total value 
-                                                        //  of collateral deposits in the modifier withinMintLimitSimple()
-                                                        // NOTE: value is code-enforced to range between 1 and 99 inclusive
+    // these 3 variables cannot be changed, hence are safe to expose as public
+    address public immutable i_dscToken;    // contract address for the DSC token
+    /**
+     *  @notice i_thresholdLimitPercent
+     *          public immutable variable
+     *  @dev    The threshold ratio mandated by the system.
+     *          To be maintained between total value of deposits and total value of mints for each user account.
+     *          Breach of this ratio mades a user liable for liquidation by other users.
+     *  @dev    Used together with FRACTION_REMOVAL_MULTIPLIER to calc health of user accounts.
+     *          If threshold is 80%, then i_thresholdLimitPercent = 80.
+     */
+    uint256 public immutable i_thresholdLimitPercent;
+    /**
+     *  @notice FRACTION_REMOVAL_MULTIPLIER
+     *          public constant
+     *  @dev    This is the multiplication factor needed to remove fractions.
+     *          eg: If threshold percent is 80%, then i_thresholdLimitPercent = 80 and FRACTION_REMOVAL_MULTIPLIER = 100.
+     *              And hence the threshold value of deposits held = (value of deposits * i_thresholdLimitPercent) / 100.
+     *          But to remove fractions and deal solely in integers, need to multiply by 100.
+     *  @dev    Used together with i_thresholdLimitPercent to calc health of user accounts.
+     */
+    uint256 public constant FRACTION_REMOVAL_MULTIPLIER = 100;
+
     // array of all allowed collateral tokens
     address[] private s_allowedCollateralTokens;
     // maps each allowed collateral token to its respective price feed and the associated precision of the price feed
@@ -141,9 +158,9 @@ contract DSCEngine is ReentrancyGuard {
     modifier withinMintLimitSimple(address user, uint256 requestedMintAmount) {
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // Approach 1 - simplified
-        //              apply a single threshold limit to total deposit value regardless of collateral
+        //              apply a single threshold percent limit to total deposit value regardless of collateral
         //              factor = (total deposit value * threshold %) / total mint value
-        //              user is within mint limits if factor > 1
+        //              user is within mint limits if factor >= 1
         /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         // calc/obtain total value of user's deposits //////////////////
         uint256 valueOfDeposits = getValueOfDepositsInUsd(user);
@@ -153,8 +170,8 @@ contract DSCEngine is ReentrancyGuard {
         /* Algorithm:
          *  uint256 factor = (valueOfDeposits * i_thresholdLimitPercent) / 
          *                      ((valueOfDscMints + requestedMintAmount) * FRACTION_REMOVAL_MULTIPLIER);
-         *      factor > 1  ie: account is healthy
-         *      factor < 1  ie: account is in arrears
+         *      factor >= 1  ie: account is healthy
+         *      factor < 1  ie: account is in arrears and liable for liquidation
          * Algorithm Description & Explanation
          * i_thresholdLimitPercent is the single threshold limit in percentage.
          *  eg: if threshold limit is 80%, then i_thresholdLimitPercent = 80
@@ -213,9 +230,9 @@ contract DSCEngine is ReentrancyGuard {
 
     modifier withinRedeemLimitSimple(address user,address collateral,uint256 requestedRedeemAmount) {
         uint256 valueOfDscMints = getValueOfDscMintsInUsd(user);
-        // if valueOfDscMints == 0, ie: no DSC minted, no user debt to system, hence free to redeem 
-        //  any collateral amount even if cleaning out all deposits, therefore just skip all the 
-        //  calcs here and continue w/ main function.
+        // if valueOfDscMints == 0, ie: no DSC minted, no user debt to system, hence any collateral 
+        //  amount is within redeem limits even if cleaning out all deposits, therefore just skip all 
+        //  the calcs here and continue w/ main function.
         if (valueOfDscMints > 0) {
             uint256 valueOfDeposits = getValueOfDepositsInUsd(user);
             uint256 valueOfRequestedRedeemAmount = convertToUsd(collateral,requestedRedeemAmount);
@@ -424,12 +441,14 @@ contract DSCEngine is ReentrancyGuard {
      *  @param  collateralTokenAddress  collateral token contract address
      *  @param  requestedDepositAmount  amount of collateral to deposit
      *  @dev    checks performed:
-     *              1. deposit is in allowed tokens
-     *              2. deposit amount is more than zero
+     *              1. deposit amount is more than zero
+     *              2. deposit is in allowed tokens
+     *              3. reentrancy check
      *          if all checks passed, then proceed to:
      *              1. record deposit (ie: change internal state)
      *              2. emit event
      *              3. perform the actual token transfer
+     *  @dev    emits CollateralDeposited() event.
      *  @dev    user is msg.sender.
      *  @dev    public, to allow depositCollateralMintDSC() to call.
      */
@@ -484,10 +503,12 @@ contract DSCEngine is ReentrancyGuard {
      *  @dev    checks performed:
      *              1. mint amount is more than zero
      *              2. user's mint limit is not been breached with this mint request
+     *              3. reentrancy check
      *          if all checks passed, then proceed:
      *              1. record mint (ie: change internal state)
      *              2. emit event
      *              3. perform actual mint and token transfer
+     *  @dev    emits DSCMinted() event.
      *  @dev    user is msg.sender.
      *  @dev    public, to allow depositCollateralMintDSC() to call.
      */
@@ -519,7 +540,9 @@ contract DSCEngine is ReentrancyGuard {
      *  @param  requestedBurnAmount DSC amount to burn
      *  @param  collateralTokenAddress  collateral to redeem
      *  @param  requestedRedeemAmount amount to redeem
-     *  @dev    all needed checks alrdy implemented in the constituent functions.
+     *  @dev    reentrancy check here.
+     *          all other checks are done in the constituent functions.
+     *  @dev    no emit here. All events emitted in constituent functions.
      *  @dev    user is msg.sender.
      */
     function burnDSCRedeemCollateral(
@@ -538,16 +561,9 @@ contract DSCEngine is ReentrancyGuard {
      *          for any user to call, to redeem collaterals held in his own account
      *  @param  collateralTokenAddress  collateral token contract address
      *  @param  requestedRedeemAmount  amount of collateral to requested for redemption
-     *  @dev    all checks are performed in the constituent function _redeemCollateral():
-     *              1. redeem amount is more than zero
-     *              2. redemption is in allowed tokens
-     *              3. sufficient balance exists in collateral held
-     *              4. user's redeem limit is not breached with this redemption request
-     *              plus the usual sanity checks on addresses, etc
-     *          all implementation logic in constituent function _redeemCollateral():
-     *              1. record redemption (ie: change internal state)
-     *              2. emit event
-     *              3. perform the actual token transfer
+     *  @dev    reentrancy check here.
+     *          all other checks are done in the constituent function.
+     *  @dev    not emit here. All events emitted in constituent function.
      *  @dev    user is msg.sender.
      */
     function redeemCollateral(
@@ -562,21 +578,38 @@ contract DSCEngine is ReentrancyGuard {
      *  @notice burnDSC()
      *          for any user to call, to burn minted dsc tokens held in his own account
      *  @param  requestedBurnAmount  amount of dsc tokens to burn
-     *  @dev    all checks are performed in the constituent function _burnDSC():
-     *              1. burn amount is more than zero
-     *              2. sufficient balance exists in user account
-     *              plus the usual sanity checks on addresses, etc
-     *          all implementation logic in constituent function _burnDSC():
-     *              1. record burn (ie: pay down user debt)
-     *              2. emit event
-     *              3. perform the token transfer from user balance to DSCEngine
-     *              4. DSCEngine performs the actual burn
+     *  @dev    reentrancy check here.
+     *          all other checks are done in the constituent function.
+     *  @dev    not emit here. All events emitted in constituent function.
      *  @dev    user is msg.sender.
      */
     function burnDSC(uint256 requestedBurnAmount) external nonReentrant {
         _burnDSC(msg.sender,msg.sender,requestedBurnAmount);
     }
 
+    /**
+     *  @notice liquidate()
+     *          for any user to call, to liquidate another user by paying for all her
+     *          debt (aka mints) and then redeeming all her deposited collaterals.
+     *  @param  userToLiquidate the user to be liquidated
+     *  @dev    checks performed:
+     *              1. reentrancy check
+     *              2. liquidatee is not:
+     *                  a. zero address
+     *                  b. owner of DecentralizedStableCoin // cannot liquidate DSC owner
+     *                  c. DSCengine                        // cannot liquidate DSCEngine
+     *                  d. liquidator                       // cannot liquidate self
+     *              3. liquidatee has non-zero deposits and mints
+     *              4. liquidator has sufficient DSC balance to pay off liquidatee debt/mints in full
+     *              5. liquidatee is below required threshold limit for deposits vs mints
+     *          if all checks passed, proceed with the liquidation:
+     *              1. liquidator burns the needed DSC tokens to pay off liquidatee's mints/debt in full
+     *              2. liquidatee's mints/debt is zeroed 
+     *              (note both (1) and (2) are performed by single function call _burnDSC())
+     *              3. liquidator redeems all of liquidatee's collateral tokens
+     *  @dev    emits Liquidated() event.
+     *  @dev    user is msg.sender.
+     */
     function liquidate(address userToLiquidate) external nonReentrant {
         // Question: What is liquidation?
         // Answer: Paying off a user's debt (minted dsc tokens in this case) and receiving the value of 
@@ -658,20 +691,16 @@ contract DSCEngine is ReentrancyGuard {
             revert DSCEngine__CannotBeLiquidated(userToLiquidate);
         }
 
-        /*
-        // liquidated user debt zeroed /////////////////////////////////////////////
-        s_userToDscMints[userToLiquidate] = 0;
-        */
-        // liquidator burns DSC tokens + zeroes liquidated user's debt /////////////
+        // liquidator burns DSC tokens + zeroes liquidatee's debt //////////////////
         _burnDSC(msg.sender,userToLiquidate,valueOfDscMints);
         for(uint256 i=0;i<s_allowedCollateralTokens.length;++i) {
-            // liquidator redeems all collaterals //////////////////////////////////
+            // liquidator redeems all liquidatee's deposited collaterals ///////////
             _redeemCollateral(
                 userToLiquidate,
                 msg.sender,
                 s_allowedCollateralTokens[i],
                 s_userToCollateralDeposits[userToLiquidate][s_allowedCollateralTokens[i]]);
-            // liquidated user collateral deposits zeroed //////////////////////////
+            // liquidatee's collateral deposits zeroed /////////////////////////////
             delete s_userToCollateralDeposits[userToLiquidate][s_allowedCollateralTokens[i]];
         }
         emit Liquidated(userToLiquidate,valueOfDscMints,valueOfDeposits);
@@ -683,12 +712,13 @@ contract DSCEngine is ReentrancyGuard {
     /**
      *  @notice getValueOfDepositsInUsd()
      *          utility function for retrieving the total value in USD of all deposits held by a given user.
-     *          to protect the privacy of the user, this function is internal and view only.
+     *          internal and view-only to protect the privacy of the user.
+     *  @param  user    the user whose deposit records are to be retrieved
      *  @dev    note that the output rounds off to the nearest dollar, ie: all decimals are truncated off.
-     *          note also that this conversion is based on prices retrieved at the time of this call.
-     *              this output should not be stored for later use as it may become stale but should
-     *              be requested afresh when needed.
-     *  @dev    returns 0 for a zero address user
+     *          note also that this conversion to USD is based on prices retrieved at the time of this call.
+     *              this output should not be stored for later use as it may become stale but should be 
+     *              requested afresh when needed.
+     *  @dev    returns 0 for a zero address user, ie: zero address user has not deposits in the system
      */
     function getValueOfDepositsInUsd(address user) internal view returns (uint256 valueInUsd) 
     {
@@ -708,9 +738,10 @@ contract DSCEngine is ReentrancyGuard {
 
     /**
      *  @notice getValueOfDscMintsInUsd()
-     *          utility function for retrieving the total value in USD of all minted DSC tokens held by a 
-     *              given user.
-     *          to protect the privacy of the user, this function is internal and view only.
+     *          utility function for retrieving the total value in USD of all mints aka debt held by a 
+     *          given user.
+     *          internal and view-only to protect the privacy of the user.
+     *  @param  user    the user who mint records are to be retrieved
      *  @dev    value of mints == amount of mints because DSC is 1:1 to USD
      *  @dev    returns 0 for a zero address user, ie: zero address user has no mints/debts in the system
      */
@@ -722,20 +753,22 @@ contract DSCEngine is ReentrancyGuard {
      *  @notice _redeemCollateral()
      *          a more generic redeem function, only for internal authorized callers
      *  @param  from    account from which deposited collateral is to be redeemed
-     *  @param  to      account to which the redeemed collateral tokens are transferred to
+     *  @param  to      account to which the redeemed collateral tokens are to be transferred to
      *  @param  collateralTokenAddress  collateral token contract address
-     *  @param  requestedRedeemAmount  amount of collateral to requested for redemption
+     *  @param  requestedRedeemAmount   amount of collateral requested for redemption
      *  @dev    checks performed:
      *              1. redeem amount is more than zero
      *              2. redemption is in allowed tokens
      *              3. sufficient balance exists in from user's collateral deposits
      *              4. from user's redeem limit is not breached with this redemption request
+     *  @dev    reentrancy check not done here but in the parent functions that call this.
      *  @dev    zero user address checks not needed because ERC20 transfer() and transferFrom() 
      *          already perform these and will revert with appropriate reverts
      *  @dev    if all checks passed, then proceed to:
      *              1. record redemption (ie: change internal state)
      *              2. emit event
-     *              3. perform the actual token transfer
+     *              3. perform the actual collateral token transfer from "from" to "to"
+     *  @dev    emits CollateralRedeemed() event
      */
     function _redeemCollateral(
         address from,
@@ -769,18 +802,20 @@ contract DSCEngine is ReentrancyGuard {
      *          a more generic burn function, only for internal authorized callers
      *  @param  dscFrom account from where the DSC tokens to be burned will be transferred from
      *  @param  onBehalfOf  account on whose behalf the DSC tokens will be burned
-     *                      ie: the account whose debt will be paid down.
-     *  @param  requestedBurnAmount  amount of dsc tokens to burn
+     *                      ie: the account whose debt aka mints will be paid down.
+     *  @param  requestedBurnAmount  amount of dsc tokens requested to burn
      *  @dev    checks performed:
      *              1. burn amount is more than zero
      *              2. sufficient balance exists in dscFrom account
+     *  @dev    reentrancy check not done here but in the parent functions that call this.
      *  @dev    zero user address checks not needed because ERC20 transfer() and transferFrom() 
      *          already perform these and will revert with appropriate reverts
      *  @dev    if all checks passed, then proceed to:
      *              1. record burn (ie: change internal state)
      *              2. emit event
-     *              3. perform the token transfer from user to DSCEngine
-     *              4. DSCEngine performs the actual burn
+     *              3. perform the DSC token transfer from dscFrom balance to DSCEngine
+     *              4. DSCEngine performs the actual DSC token burn
+     *  @dev    emits DSCBurned() event
      */
     function _burnDSC(
         address dscFrom,
@@ -813,15 +848,13 @@ contract DSCEngine is ReentrancyGuard {
     /**
      *  @notice convertFromTo()
      *          utility function for converting from 1 token to another
-     *          this function will not accept dsc token. Conversion to/from dsc token is equivalent
-     *              to conversion to/from USD since dsc is pegged 1:1 to USD. The 2 functions
-     *              convertToUsd() and convertFromUsd() may be used instead.
+     *  @dev    note that this function will not accept the DSC token. Conversion to/from DSC is equivalent 
+     *          to conversion to/from USD since dsc is pegged 1:1 to USD.
+     *          The 2 other functions convertToUsd() and convertFromUsd() may be used instead.
      *  @dev    note that the output rounds off to the nearest unit, ie: all decimals are truncated off.
      *          note also that this conversion is based on prices retrieved at the time of this call.
-     *              this output should not be stored for later use as it may become stale but should
-     *              be requested afresh when needed.
-     *  @dev    note that this function will not accept dsc token. Conversion to/from dsc token is equivalent
-     *              to conversion to/from USD since dsc is pegged 1:1 to USD.
+     *          this output should not be stored for later use as it may become stale but should be 
+     *          requested afresh when needed.
      */
     function convertFromTo(
         address fromToken,
@@ -840,14 +873,14 @@ contract DSCEngine is ReentrancyGuard {
 
     /**
      *  @notice convertFromUsd()
-     *          utility function for converting from USD to the specified token,
-     *              ie: how much of the token can the given amount of USD buy
-     *          this function will not accept dsc token, nor is it necessary since dsc is pegged
-     *              1:1 to USD, ie: 1 USD buys 1 DSC.
+     *          utility function for converting from USD to the specified token, ie: how much of the 
+     *          token can the given amount of USD buy.
+     *  @dev    this function will not accept the DSC token, nor is it necessary since DSC is pegged
+     *          1:1 to USD, ie: 1 USD buys 1 DSC.
      *  @dev    note that the output rounds off to the nearest unit, ie: all decimals are truncated off.
      *          note also that this conversion is based on prices retrieved at the time of this call.
-     *              this output should not be stored for later use as it may become stale but should
-     *              be requested afresh when needed.
+     *          this output should not be stored for later use as it may become stale but should be 
+     *          requested afresh when needed.
      */
     function convertFromUsd(
         uint256 amountUsd,
@@ -865,12 +898,12 @@ contract DSCEngine is ReentrancyGuard {
     /**
      *  @notice convertToUsd()
      *          utility function for converting any given token amount into equivalent USD.
-     *          this function will not accept dsc token, nor is it necessary since dsc is pegged
-     *              1:1 to USD, ie: 1 DSC converts to 1 USD.
+     *  @dev    note that this function will not accept the DSC token, nor is it necessary since DSC
+     *          is pegged 1:1 to USD, ie: 1 DSC converts to 1 USD.
      *  @dev    note that the output rounds off to the nearest dollar, ie: all decimals are truncated off.
      *          note also that this conversion is based on prices retrieved at the time of this call.
-     *              this output should not be stored for later use as it may become stale but should
-     *              be requested afresh when needed.
+     *          this output should not be stored for later use as it may become stale but should be 
+     *          requested afresh when needed.
      */
     function convertToUsd(
         address token, 
@@ -889,8 +922,6 @@ contract DSCEngine is ReentrancyGuard {
         if (answer <= 0) {
             revert DSCEngine__DataFeedError(token,priceFeed,answer);
         }
-        // multiply amount by token price and return value in USD
-        //return uint256(answer) * amount;
         // Cyfrin Updraft says what Chainlink Data Feed returns is (price * decimal precision)
         //  where decimal precision is given for each feed under Dec column in price feed page.
         //  So according to Updraft, correct return value = (uint256(answer) * 1e10 * amount) / 1e18
@@ -908,16 +939,6 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* Getter Functions *////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    function getFractionRemovalMultiplier() external pure returns (uint256) {
-        return FRACTION_REMOVAL_MULTIPLIER;
-    }
-    function getDscTokenAddress() external view returns (address) {
-        return i_dscToken;
-    }
-    function getThresholdLimitPercent() external view returns (uint256) {
-        return i_thresholdLimitPercent;
-    }
-
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // This function is UNSAFE as it returns the internal array s_allowedCollateralTokens by reference,
     //  allowing the array to be modified outside of this function or even outside of the contract.

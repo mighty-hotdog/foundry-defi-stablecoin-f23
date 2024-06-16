@@ -5,18 +5,16 @@ pragma solidity ^0.8.18;
 import {Test,console} from "forge-std/Test.sol";
 import {DecentralizedStableCoin} from "../../src/DecentralizedStableCoin.sol";
 import {DSCEngine} from "../../src/DSCEngine.sol";
-import {DeployDecentralizedStableCoin} from "../../script/DeployDecentralizedStableCoin.s.sol";
-import {DeployDSCEngine} from "../../script/DeployDSCEngine.s.sol";
 import {ChainConfigurator} from "../../script/ChainConfigurator.s.sol";
+import {DeployDSC} from "../../script/DeployDSC.s.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 import {MockAggregatorV3} from "../../test/mocks/MockAggregatorV3.sol";
 
-contract DSCEngineTest is Test {
+contract DSCEngineAltTest is Test {
     DecentralizedStableCoin public coin;
-    DeployDecentralizedStableCoin public coinDeployer;
     DSCEngine public engine;
-    DeployDSCEngine public engineDeployer;
     ChainConfigurator public config;
+    DeployDSC public deployer;
     address public USER;
 
     ///////////////////////////////////////////////////////////////////////////////////
@@ -49,12 +47,9 @@ contract DSCEngineTest is Test {
 
     /* Setup Function */
     function setUp() external {
-        // deploy coin (using coin deployer)
-        coinDeployer = new DeployDecentralizedStableCoin();
-        coin = coinDeployer.run();
-        // deploy engine (using engine deployer)
-        engineDeployer = new DeployDSCEngine();
-        (engine,config) = engineDeployer.run(address(coin));
+        // deploy coin and engine together
+        deployer = new DeployDSC();
+        (coin,engine,config) = deployer.run();
 
         // prepare generic prank user; balances and approvals better to setup within 
         //  each test according to needs of situation
@@ -65,77 +60,91 @@ contract DSCEngineTest is Test {
     // Unit tests for constructor()
     ////////////////////////////////////////////////////////////////////
     function testDscTokenAddressCannotBeZero(uint256 thresholdLimit) external {
-        address[] memory arrayOne;
-        address[] memory arrayTwo;
-        uint256[] memory arrayThree;
-        address dscTokenAddress = address(0);
+        address[] memory addrArray;
+        uint256[] memory uintArray;
         vm.expectRevert(DSCEngine.DSCEngine__TokenAddressCannotBeZero.selector);
-        new DSCEngine(arrayOne,arrayTwo,arrayThree,dscTokenAddress,thresholdLimit);
+        new DSCEngine(addrArray,addrArray,uintArray,address(0),thresholdLimit);
     }
     function testValidDscToken() external view {
-        assert(engine.getDscTokenAddress() == address(coin));
+        assert(engine.i_dscToken() == address(coin));
     }
     function testThresholdPercentWithinRange() external view {
-        assert((engine.getThresholdLimitPercent() >= 1) && (engine.getThresholdLimitPercent() <= 99));
+        assert(engine.i_thresholdLimitPercent() >= 1);
+        assert(engine.i_thresholdLimitPercent() <= 99);
     }
     function testValidThresholdPercent() external view {
-        assert(engine.getThresholdLimitPercent() == vm.envUint("THRESHOLD_PERCENT"));
+        assert(engine.i_thresholdLimitPercent() == vm.envUint("THRESHOLD_PERCENT"));
     }
     function testConstructorInputParamsMismatch(
+        address token,
         uint256 arrayOneLength,
         uint256 arrayTwoLength,
         uint256 arrayThreeLength,
-        uint256 thresholdLimit) external 
+        uint256 threshold) external 
     {
-        arrayOneLength = bound(arrayOneLength,2,256);
-        arrayTwoLength = bound(arrayTwoLength,2,256);
-        arrayThreeLength = bound(arrayThreeLength,2,256);
-        thresholdLimit = bound(thresholdLimit,1,99);
-        address dscTokenAddress = makeAddr("mock token address");
-        if (!((arrayOneLength == arrayTwoLength) &&
-            (arrayOneLength == arrayThreeLength))) {
+        vm.assume(token != address(0));
+        threshold = bound(threshold,1,99);
+        arrayOneLength = bound(arrayOneLength,1,256);
+        arrayTwoLength = bound(arrayTwoLength,1,256);
+        arrayThreeLength = bound(arrayThreeLength,1,256);
+        if (!(
+            (arrayOneLength == arrayTwoLength) &&
+            (arrayTwoLength == arrayThreeLength))) 
+        {
             address[] memory arrayOne = new address[](arrayOneLength);
             address[] memory arrayTwo = new address[](arrayTwoLength);
             uint256[] memory arrayThree = new uint256[](arrayThreeLength);
-            console.log("arrayOne.length: ",arrayOne.length);
-            console.log("arrayTwo.length: ",arrayTwo.length);
-            console.log("arrayThree.length: ",arrayThree.length);
             vm.expectRevert(
                 abi.encodeWithSelector(
                     bytes4(keccak256("DSCEngine__ConstructorInputParamsMismatch(uint256,uint256,uint256)")),
                     arrayOne.length,
                     arrayTwo.length,
                     arrayThree.length));
-            new DSCEngine(arrayOne,arrayTwo,arrayThree,dscTokenAddress,thresholdLimit);
+            new DSCEngine(arrayOne,arrayTwo,arrayThree,token,threshold);
         }
     }
-    function testCollateralTokenAddressCannotBeZero(uint256 arrayLength,uint256 thresholdLimit) external {
-        arrayLength = bound(arrayLength,2,256);
-        thresholdLimit = bound(thresholdLimit,1,99);
-        address dscTokenAddress = makeAddr("mock token address");
+    function testCollateralTokenAddressCannotBeZero(
+        address token,
+        uint256 arrayLength,
+        uint256 threshold
+        ) external 
+    {
+        vm.assume(token != address(0));
+        arrayLength = bound(arrayLength,1,256);
+        threshold = bound(threshold,1,99);
         address[] memory arrayCollateral = new address[](arrayLength);
         address[] memory arrayPriceFeed = new address[](arrayLength);
         uint256[] memory arrayPrecision = new uint256[](arrayLength);
         arrayCollateral[0] = address(0);
         vm.expectRevert(DSCEngine.DSCEngine__TokenAddressCannotBeZero.selector);
-        new DSCEngine(arrayCollateral,arrayPriceFeed,arrayPrecision,dscTokenAddress,thresholdLimit);
+        new DSCEngine(arrayCollateral,arrayPriceFeed,arrayPrecision,token,threshold);
     }
-    function testPriceFeedAddressCannotBeZero(uint256 arrayLength,uint256 thresholdLimit) external {
-        arrayLength = bound(arrayLength,2,256);
-        thresholdLimit = bound(thresholdLimit,1,99);
-        address dscTokenAddress = makeAddr("mock token address");
+    function testPriceFeedAddressCannotBeZero(
+        address token,
+        uint256 arrayLength,
+        uint256 threshold
+        ) external 
+    {
+        vm.assume(token != address(0));
+        arrayLength = bound(arrayLength,1,256);
+        threshold = bound(threshold,1,99);
         address[] memory arrayCollateral = new address[](arrayLength);
         address[] memory arrayPriceFeed = new address[](arrayLength);
         uint256[] memory arrayPrecision = new uint256[](arrayLength);
         arrayCollateral[0] = makeAddr("collateral");
         arrayPriceFeed[0] = address(0);
         vm.expectRevert(DSCEngine.DSCEngine__PriceFeedAddressCannotBeZero.selector);
-        new DSCEngine(arrayCollateral,arrayPriceFeed,arrayPrecision,dscTokenAddress,thresholdLimit);
+        new DSCEngine(arrayCollateral,arrayPriceFeed,arrayPrecision,token,threshold);
     }
-    function testPriceFeedPrecisionCannotBeZero(uint256 arrayLength,uint256 thresholdLimit) external {
-        arrayLength = bound(arrayLength,2,256);
-        thresholdLimit = bound(thresholdLimit,1,99);
-        address dscTokenAddress = makeAddr("mock token address");
+    function testPriceFeedPrecisionCannotBeZero(
+        address token,
+        uint256 arrayLength,
+        uint256 threshold
+        ) external 
+    {
+        vm.assume(token != address(0));
+        arrayLength = bound(arrayLength,1,256);
+        threshold = bound(threshold,1,99);
         address[] memory arrayCollateral = new address[](arrayLength);
         address[] memory arrayPriceFeed = new address[](arrayLength);
         uint256[] memory arrayPrecision = new uint256[](arrayLength);
@@ -143,7 +152,7 @@ contract DSCEngineTest is Test {
         arrayPriceFeed[0] = makeAddr("price feed");
         arrayPrecision[0] = 0;
         vm.expectRevert(DSCEngine.DSCEngine__PriceFeedPrecisionCannotBeZero.selector);
-        new DSCEngine(arrayCollateral,arrayPriceFeed,arrayPrecision,dscTokenAddress,thresholdLimit);
+        new DSCEngine(arrayCollateral,arrayPriceFeed,arrayPrecision,token,threshold);
     }
     // Skipped. This is more of a deployment/integration test.
     // It is already performed in the DeployDSCEngineTest test script under:
@@ -270,8 +279,8 @@ contract DSCEngineTest is Test {
         engine.depositCollateral(wbtc,wbtcDeposit);
 
         uint256 maxSafeMintAmount = engine.getDepositsValueInUsd() 
-            * engine.getThresholdLimitPercent() 
-            / engine.getFractionRemovalMultiplier();
+            * engine.i_thresholdLimitPercent() 
+            / engine.FRACTION_REMOVAL_MULTIPLIER();
         mintAmount = bound(mintAmount,1,maxSafeMintAmount);
         engine.mintDSC(mintAmount);
         vm.stopPrank();
@@ -303,8 +312,8 @@ contract DSCEngineTest is Test {
         engine.depositCollateral(wbtc,wbtcDeposit);
 
         uint256 maxSafeMintAmount = engine.getDepositsValueInUsd() 
-            * engine.getThresholdLimitPercent() 
-            / engine.getFractionRemovalMultiplier();
+            * engine.i_thresholdLimitPercent() 
+            / engine.FRACTION_REMOVAL_MULTIPLIER();
         mintAmount = bound(mintAmount,1,maxSafeMintAmount);
         engine.mintDSC(mintAmount);
         vm.stopPrank();
@@ -313,7 +322,7 @@ contract DSCEngineTest is Test {
         DSCEngine.Holding[] memory tokens = engine.getTokensHeld();
 
         // dsc token tests
-        assertEq(tokens[0].token,engine.getDscTokenAddress());
+        assertEq(tokens[0].token,engine.i_dscToken());
         assertEq(tokens[0].isCollateral,false);
         assertEq(tokens[0].amount,mintAmount);
         assertEq(tokens[0].currentPrice,1);
@@ -349,8 +358,8 @@ contract DSCEngineTest is Test {
         engine.depositCollateral(wbtc,wbtcDeposit);
 
         uint256 maxSafeMintAmount = engine.getDepositsValueInUsd() 
-            * engine.getThresholdLimitPercent() 
-            / engine.getFractionRemovalMultiplier();
+            * engine.i_thresholdLimitPercent() 
+            / engine.FRACTION_REMOVAL_MULTIPLIER();
         mintAmount = bound(mintAmount,1,maxSafeMintAmount);
         engine.mintDSC(mintAmount);
         vm.stopPrank();
@@ -365,103 +374,61 @@ contract DSCEngineTest is Test {
     ////////////////////////////////////////////////////////////////////
     // Unit tests for depositCollateralMintDSC()
     ////////////////////////////////////////////////////////////////////
-    function testDepositCollateralMintDSCWeth(uint256 depositAmount,uint256 mintAmount) external
-    {
-        (address token,,,,,) = config.s_activeChainConfig();
-        (uint256 depositAmountReturn,uint256 mintAmountReturn) = SetupTestDepositCollateralMintDSC(
-            token,
-            depositAmount,
-            mintAmount);
-        // collect the initial values
-        vm.startPrank(USER);
-        uint256 userCollateralBalanceBefore = ERC20Mock(token).balanceOf(USER);
-        uint256 userDepositBefore = engine.getDepositAmount(token);
-        uint256 userDSCBalanceBefore = coin.balanceOf(USER);
-        uint256 userMintBefore = engine.getMints();
-        uint256 engineCollateralBalanceBefore = ERC20Mock(token).balanceOf(address(engine));
-        uint256 dscTotalSupplyBefore = coin.totalSupply();
-        // check initial values
-        assertEq(userCollateralBalanceBefore,depositAmountReturn);
-        assertEq(userDepositBefore,0);
-        assertEq(userDSCBalanceBefore,0);
-        assertEq(userMintBefore,0);
-        assertEq(engineCollateralBalanceBefore,0);
-        assertEq(dscTotalSupplyBefore,0);
-        vm.stopPrank();
-
-        // perform the deposit and mint
-        vm.prank(USER);
-        engine.depositCollateralMintDSC(token,depositAmountReturn,mintAmountReturn);
-
-        // do the tests
-        vm.startPrank(USER);
-        assertEq(ERC20Mock(token).balanceOf(USER),userCollateralBalanceBefore-depositAmountReturn);
-        assertEq(engine.getDepositAmount(token),userDepositBefore+depositAmountReturn);
-        assertEq(coin.balanceOf(USER),userDSCBalanceBefore+mintAmountReturn);
-        assertEq(engine.getMints(),userMintBefore+mintAmountReturn);
-        assertEq(ERC20Mock(token).balanceOf(address(engine)),engineCollateralBalanceBefore+depositAmountReturn);
-        assertEq(coin.totalSupply(),dscTotalSupplyBefore+mintAmountReturn);
-        vm.stopPrank();
-    }
-    function testDepositCollateralMintDSCWbtc(uint256 depositAmount,uint256 mintAmount) external
-    {
-        (,address token,,,,) = config.s_activeChainConfig();
-        (uint256 depositAmountReturn,uint256 mintAmountReturn) = SetupTestDepositCollateralMintDSC(
-            token,
-            depositAmount,
-            mintAmount);
-        // collect the initial values
-        vm.startPrank(USER);
-        uint256 userCollateralBalanceBefore = ERC20Mock(token).balanceOf(USER);
-        uint256 userDepositBefore = engine.getDepositAmount(token);
-        uint256 userDSCBalanceBefore = coin.balanceOf(USER);
-        uint256 userMintBefore = engine.getMints();
-        uint256 engineCollateralBalanceBefore = ERC20Mock(token).balanceOf(address(engine));
-        uint256 dscTotalSupplyBefore = coin.totalSupply();
-        // check initial values
-        assertEq(userCollateralBalanceBefore,depositAmountReturn);
-        assertEq(userDepositBefore,0);
-        assertEq(userDSCBalanceBefore,0);
-        assertEq(userMintBefore,0);
-        assertEq(engineCollateralBalanceBefore,0);
-        assertEq(dscTotalSupplyBefore,0);
-        vm.stopPrank();
-
-        // perform the deposit and mint
-        vm.prank(USER);
-        engine.depositCollateralMintDSC(token,depositAmountReturn,mintAmountReturn);
-
-        // do the tests
-        vm.startPrank(USER);
-        assertEq(ERC20Mock(token).balanceOf(USER),userCollateralBalanceBefore-depositAmountReturn);
-        assertEq(engine.getDepositAmount(token),userDepositBefore+depositAmountReturn);
-        assertEq(coin.balanceOf(USER),userDSCBalanceBefore+mintAmountReturn);
-        assertEq(engine.getMints(),userMintBefore+mintAmountReturn);
-        assertEq(ERC20Mock(token).balanceOf(address(engine)),engineCollateralBalanceBefore+depositAmountReturn);
-        assertEq(coin.totalSupply(),dscTotalSupplyBefore+mintAmountReturn);
-        vm.stopPrank();
-    }
-    function SetupTestDepositCollateralMintDSC(
-        address token,
+    function testDepositCollateralMintDSC(
+        uint256 tokenSeed,
         uint256 depositAmount,
-        uint256 mintAmount) internal returns (uint256 depositAmountReturn,uint256 mintAmountReturn)
+        uint256 mintAmount
+        ) external skipIfNotOnAnvil
     {
-        uint256 maxDepositAmount = 1e9; // 1 billion collateral tokens
-        depositAmount = bound(depositAmount,1,maxDepositAmount);
-        // deposits value * threshold / fractional = max mint value
-        //  note that since DSC is 1:1 to USD, mint value == mint amount
-        uint256 threshold = engine.getThresholdLimitPercent();
-        uint256 fractional = engine.getFractionRemovalMultiplier();
-        uint256 depositValue = engine.convertToUsd(token,depositAmount);
-        uint256 maxMintAmount = depositValue * threshold / fractional;
-        mintAmount = bound(mintAmount,1,maxMintAmount);
+        address token;
+        {
+        if (tokenSeed % 2 == 0) {(token,,,,,) = config.s_activeChainConfig();}
+        else {(,token,,,,) = config.s_activeChainConfig();}
+            uint256 maxDepositAmount = 1e9; // 1 billion collateral tokens
+            depositAmount = bound(depositAmount,1,maxDepositAmount);
+            // deposits value * threshold / fractional = max mint value
+            //  note that since DSC is 1:1 to USD, mint value == mint amount
+            uint256 threshold = engine.i_thresholdLimitPercent();
+            uint256 fractional = engine.FRACTION_REMOVAL_MULTIPLIER();
+            uint256 depositValue = engine.convertToUsd(token,depositAmount);
+            uint256 maxMintAmount = depositValue * threshold / fractional;
+            mintAmount = bound(mintAmount,1,maxMintAmount);
 
-        // setup needed prerequisite collateral mints and approvals
-        ERC20Mock(token).mint(USER,depositAmount);
+            // setup needed prerequisite collateral mints and approvals
+            ERC20Mock(token).mint(USER,depositAmount);
+            vm.prank(USER);
+            ERC20Mock(token).approve(address(engine),depositAmount);
+        }
+        // collect the initial values
+        vm.startPrank(USER);
+        uint256 userCollateralBalanceBefore = ERC20Mock(token).balanceOf(USER);
+        uint256 userDepositBefore = engine.getDepositAmount(token);
+        uint256 userDSCBalanceBefore = coin.balanceOf(USER);
+        uint256 userMintBefore = engine.getMints();
+        uint256 engineCollateralBalanceBefore = ERC20Mock(token).balanceOf(address(engine));
+        uint256 dscTotalSupplyBefore = coin.totalSupply();
+        // check initial values
+        assertEq(userCollateralBalanceBefore,depositAmount);
+        assertEq(userDepositBefore,0);
+        assertEq(userDSCBalanceBefore,0);
+        assertEq(userMintBefore,0);
+        assertEq(engineCollateralBalanceBefore,0);
+        assertEq(dscTotalSupplyBefore,0);
+        vm.stopPrank();
+
+        // perform the deposit and mint
         vm.prank(USER);
-        ERC20Mock(token).approve(address(engine),depositAmount);
+        engine.depositCollateralMintDSC(token,depositAmount,mintAmount);
 
-        return (depositAmount,mintAmount);
+        // do the tests
+        vm.startPrank(USER);
+        assertEq(ERC20Mock(token).balanceOf(USER),userCollateralBalanceBefore-depositAmount);
+        assertEq(engine.getDepositAmount(token),userDepositBefore+depositAmount);
+        assertEq(coin.balanceOf(USER),userDSCBalanceBefore+mintAmount);
+        assertEq(engine.getMints(),userMintBefore+mintAmount);
+        assertEq(ERC20Mock(token).balanceOf(address(engine)),engineCollateralBalanceBefore+depositAmount);
+        assertEq(coin.totalSupply(),dscTotalSupplyBefore+mintAmount);
+        vm.stopPrank();
     }
 
     ////////////////////////////////////////////////////////////////////
@@ -558,7 +525,8 @@ contract DSCEngineTest is Test {
         uint256 wethDepositAmount,
         uint256 wbtcDepositAmount,
         uint256 valueOfMintsAlreadyHeld
-        ) external skipIfNotOnAnvil {
+        ) external skipIfNotOnAnvil 
+    {
         // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
         //  contracts on the Sepolia or Mainnet, hence this call doesn't work on those chains 
         //  and we have no way to mint the user some WETH/WBTC for the deposit call.
@@ -612,9 +580,9 @@ contract DSCEngineTest is Test {
             vm.stopPrank();
         }
         //  6. calc numerator, ie: valueOfDepositsHeld * thresholdLimit
-        uint256 numerator = engine.exposegetValueOfDepositsInUsd(minter) * engine.getThresholdLimitPercent();
+        uint256 numerator = engine.exposegetValueOfDepositsInUsd(minter) * engine.i_thresholdLimitPercent();
         //  7. bound valueOfMintsAlreadyHeld by numerator / FRACTION_REMOVAL_MULTIPLIER
-        valueOfMintsAlreadyHeld = bound(valueOfMintsAlreadyHeld,0,numerator/engine.getFractionRemovalMultiplier());
+        valueOfMintsAlreadyHeld = bound(valueOfMintsAlreadyHeld,0,numerator/engine.FRACTION_REMOVAL_MULTIPLIER());
         //  8. mint valueOfMintsAlreadyHeld via mintDSC()
         if (valueOfMintsAlreadyHeld > 0) {
             vm.prank(minter);
@@ -622,7 +590,7 @@ contract DSCEngineTest is Test {
         }
         //  9. bound requestedMintAmount for a particular random valueOfMintsAlreadyHeld value such that mint
         //      request is **OUTSIDE** limit
-        uint256 maxSafeMintAmount = (numerator / engine.getFractionRemovalMultiplier()) - 
+        uint256 maxSafeMintAmount = (numerator / engine.FRACTION_REMOVAL_MULTIPLIER()) - 
             engine.exposegetValueOfDscMintsInUsd(minter);
         requestedMintAmount = bound(
             requestedMintAmount,
@@ -652,7 +620,8 @@ contract DSCEngineTest is Test {
         uint256 wethDepositAmount,
         uint256 wbtcDepositAmount,
         uint256 valueOfMintsAlreadyHeld
-        ) external skipIfNotOnAnvil {
+        ) external skipIfNotOnAnvil 
+    {
         // this test calls ERC20Mock.mint() which is not implemented in the real WETH and WBTC 
         //  contracts on the Sepolia or Mainnet, hence this call doesn't work on those chains 
         //  and we have no way to mint the user some WETH/WBTC for the deposit call.
@@ -710,9 +679,9 @@ contract DSCEngineTest is Test {
             vm.stopPrank();
         }
         //  6. calc numerator, ie: valueOfDepositsHeld * thresholdLimit
-        uint256 numerator = engine.exposegetValueOfDepositsInUsd(USER) * engine.getThresholdLimitPercent();
+        uint256 numerator = engine.exposegetValueOfDepositsInUsd(USER) * engine.i_thresholdLimitPercent();
         //  7. bound valueOfMintsAlreadyHeld by numerator / FRACTION_REMOVAL_MULTIPLIER
-        valueOfMintsAlreadyHeld = bound(valueOfMintsAlreadyHeld,0,numerator/engine.getFractionRemovalMultiplier());
+        valueOfMintsAlreadyHeld = bound(valueOfMintsAlreadyHeld,0,numerator/engine.FRACTION_REMOVAL_MULTIPLIER());
         //  8. mint valueOfMintsAlreadyHeld via mintDSC()
         if (valueOfMintsAlreadyHeld > 0) {
             vm.prank(USER);
@@ -723,7 +692,7 @@ contract DSCEngineTest is Test {
         requestedMintAmount = bound(
             requestedMintAmount,
             0,
-            (numerator/engine.getFractionRemovalMultiplier())-engine.exposegetValueOfDscMintsInUsd(USER));
+            (numerator/engine.FRACTION_REMOVAL_MULTIPLIER())-engine.exposegetValueOfDscMintsInUsd(USER));
         //  10. perform the test by calling mintDSC() for random requestedMintAmount
         if (requestedMintAmount > 0) {
             //  11. check that:
@@ -748,20 +717,45 @@ contract DSCEngineTest is Test {
     ////////////////////////////////////////////////////////////////////
     // Unit tests for burnDSCRedeemCollateral()
     ////////////////////////////////////////////////////////////////////
-    function testBurnDSCRedeemCollateralWeth(
+    function testBurnDSCRedeemCollateral(
+        uint256 tokenSeed,
         uint256 burnAmount,
         uint256 redeemAmount,
         uint256 depositAmount,
-        uint256 mintAmount) internal 
+        uint256 mintAmount
+        ) external skipIfNotOnAnvil
     {
-        (address token,,,,,) = config.s_activeChainConfig();        
-        (uint256 burnAmountReturn,uint256 redeemAmountReturn) = 
-            SetupBurnDSCRedeemCollateral(
-                burnAmount,
-                token,
-                redeemAmount,
-                depositAmount,
-                mintAmount);
+        address token;
+        {
+            if (tokenSeed % 2 == 0) {(token,,,,,) = config.s_activeChainConfig();}
+            else {(,token,,,,) = config.s_activeChainConfig();}
+            uint256 maxDepositAmount = 1e9; // 1 billion collateral tokens
+            depositAmount = bound(depositAmount,1,maxDepositAmount);
+            uint256 threshold = engine.i_thresholdLimitPercent();
+            uint256 fractional = engine.FRACTION_REMOVAL_MULTIPLIER();
+            uint256 valueOfDeposit = engine.convertToUsd(token,depositAmount);
+            uint256 maxSafeMintAmount = valueOfDeposit * threshold / fractional;
+            mintAmount = bound(mintAmount,1,maxSafeMintAmount);
+            burnAmount = bound(burnAmount,1,mintAmount);
+            // (deposit value - max redeem value) * threshold / fractional = mint value - burn value
+            // max redeem value = deposit value - (mint value - burn value) * fractional / threshold
+            // max redeem amount = convertFromUsd(deposit value - (mint value - burn value) * fractional / threshold)
+            uint256 maxSafeRedeemAmount = engine.convertFromUsd(
+                valueOfDeposit - (mintAmount - burnAmount) * fractional / threshold,token);
+            // restart run if maxSafeRedeemAmount < 1, as this will cause the redeemAmount bound to fail
+            vm.assume(maxSafeRedeemAmount > 0);
+            //if (maxSafeRedeemAmount < 1) return;
+            redeemAmount = bound(redeemAmount,1,maxSafeRedeemAmount);
+
+            ERC20Mock(token).mint(USER,depositAmount);
+            vm.startPrank(USER);
+            ERC20Mock(token).approve(address(engine),depositAmount);
+            engine.depositCollateral(token,depositAmount);
+            engine.mintDSC(mintAmount);
+            coin.approve(address(engine),burnAmount);
+            vm.stopPrank();
+        }
+
         // collect initial values
         vm.startPrank(USER);
         uint256 mintsBefore = engine.getMints();
@@ -773,87 +767,16 @@ contract DSCEngineTest is Test {
         uint256 engineCollateralTokenBalanceBefore = ERC20Mock(token).balanceOf(address(engine));
         // perform burn and redeem
         vm.startPrank(USER);
-        engine.burnDSCRedeemCollateral(burnAmountReturn,token,redeemAmountReturn);
+        engine.burnDSCRedeemCollateral(burnAmount,token,redeemAmount);
         // burn tests
-        assertEq(engine.getMints(),mintsBefore-burnAmountReturn);
-        assertEq(coin.balanceOf(USER),userDscBalanceBefore-burnAmountReturn);
-        assertEq(coin.totalSupply(),dscTotalSupplyBefore-burnAmountReturn);
+        assertEq(engine.getMints(),mintsBefore-burnAmount);
+        assertEq(coin.balanceOf(USER),userDscBalanceBefore-burnAmount);
+        assertEq(coin.totalSupply(),dscTotalSupplyBefore-burnAmount);
         // redeem tests
-        assertEq(engine.getDepositAmount(token),depositsBefore-redeemAmountReturn);
-        assertEq(ERC20Mock(token).balanceOf(USER),userCollateralTokenBalanceBefore+redeemAmountReturn);
-        assertEq(ERC20Mock(token).balanceOf(address(engine)),engineCollateralTokenBalanceBefore-redeemAmountReturn);
+        assertEq(engine.getDepositAmount(token),depositsBefore-redeemAmount);
+        assertEq(ERC20Mock(token).balanceOf(USER),userCollateralTokenBalanceBefore+redeemAmount);
+        assertEq(ERC20Mock(token).balanceOf(address(engine)),engineCollateralTokenBalanceBefore-redeemAmount);
         vm.stopPrank();
-    }
-    function testBurnDSCRedeemCollateralWbtc(
-        uint256 burnAmount,
-        uint256 redeemAmount,
-        uint256 depositAmount,
-        uint256 mintAmount) internal 
-    {
-        (,address token,,,,) = config.s_activeChainConfig();        
-        (uint256 burnAmountReturn,uint256 redeemAmountReturn) = 
-            SetupBurnDSCRedeemCollateral(
-                burnAmount,
-                token,
-                redeemAmount,
-                depositAmount,
-                mintAmount);
-        // collect initial values
-        vm.startPrank(USER);
-        uint256 mintsBefore = engine.getMints();
-        uint256 depositsBefore = engine.getDepositAmount(token);
-        vm.stopPrank();
-        uint256 userDscBalanceBefore = coin.balanceOf(USER);
-        uint256 dscTotalSupplyBefore = coin.totalSupply();
-        uint256 userCollateralTokenBalanceBefore = ERC20Mock(token).balanceOf(USER);
-        uint256 engineCollateralTokenBalanceBefore = ERC20Mock(token).balanceOf(address(engine));
-        // perform burn and redeem
-        vm.startPrank(USER);
-        engine.burnDSCRedeemCollateral(burnAmountReturn,token,redeemAmountReturn);
-        // burn tests
-        assertEq(engine.getMints(),mintsBefore-burnAmountReturn);
-        assertEq(coin.balanceOf(USER),userDscBalanceBefore-burnAmountReturn);
-        assertEq(coin.totalSupply(),dscTotalSupplyBefore-burnAmountReturn);
-        // redeem tests
-        assertEq(engine.getDepositAmount(token),depositsBefore-redeemAmountReturn);
-        assertEq(ERC20Mock(token).balanceOf(USER),userCollateralTokenBalanceBefore+redeemAmountReturn);
-        assertEq(ERC20Mock(token).balanceOf(address(engine)),engineCollateralTokenBalanceBefore-redeemAmountReturn);
-        vm.stopPrank();
-    }
-    function SetupBurnDSCRedeemCollateral(
-        uint256 burnAmount,
-        address token,
-        uint256 redeemAmount,
-        uint256 depositAmount,
-        uint256 mintAmount) internal 
-        returns(uint256 burnAmountReturn,uint256 redeemAmountReturn)
-    {
-        uint256 maxDepositAmount = 1e9; // 1 billion collateral tokens
-        depositAmount = bound(depositAmount,1,maxDepositAmount);
-        uint256 threshold = engine.getThresholdLimitPercent();
-        uint256 fractional = engine.getFractionRemovalMultiplier();
-        uint256 valueOfDeposit = engine.convertToUsd(token,depositAmount);
-        uint256 maxSafeMintAmount = valueOfDeposit * threshold / fractional;
-        mintAmount = bound(mintAmount,1,maxSafeMintAmount);
-        burnAmount = bound(burnAmount,1,mintAmount);
-        // (deposit value - max redeem value) * threshold / fractional = mint value - burn value
-        // max redeem value = deposit value - (mint value - burn value) * fractional / threshold
-        // max redeem amount = convertFromUsd(deposit value - (mint value - burn value) * fractional / threshold)
-        uint256 maxSafeRedeemAmount = engine.convertFromUsd(
-            valueOfDeposit - (mintAmount - burnAmount) * fractional / threshold,token);
-        // restart run if maxSafeRedeemAmount < 1, as this will cause the redeemAmount bound to fail
-        vm.assume(maxSafeRedeemAmount > 0);
-        //if (maxSafeRedeemAmount < 1) return;
-        redeemAmount = bound(redeemAmount,1,maxSafeRedeemAmount);
-
-        ERC20Mock(token).mint(USER,depositAmount);
-        vm.startPrank(USER);
-        ERC20Mock(token).approve(address(engine),depositAmount);
-        engine.depositCollateral(token,depositAmount);
-        engine.mintDSC(mintAmount);
-        vm.stopPrank();
-
-        return (burnAmount,redeemAmount);
     }
 
     ////////////////////////////////////////////////////////////////////
@@ -883,34 +806,15 @@ contract DSCEngineTest is Test {
                 token));
         engine.redeemCollateral(token,amount);
     }
-    function testRedeemInsufficientBalanceWeth(
+    function testRedeemInsufficientBalance(
+        uint256 tokenSeed,
         uint256 redeemAmount,
         uint256 depositAmount
         ) external skipIfNotOnAnvil 
     {
-        (address token,,,,,) = config.s_activeChainConfig();
-        _redeemInsufficientBalance(
-            token,
-            redeemAmount,
-            depositAmount);
-    }
-    function testRedeemInsufficientBalanceWbtc(
-        uint256 redeemAmount,
-        uint256 depositAmount
-        ) external skipIfNotOnAnvil 
-    {
-        (,address token,,,,) = config.s_activeChainConfig();
-        _redeemInsufficientBalance(
-            token,
-            redeemAmount,
-            depositAmount);
-    }
-    function _redeemInsufficientBalance(
-        address token,
-        uint256 redeemAmount,
-        uint256 depositAmount
-        ) internal
-    {
+        address token;
+        if (tokenSeed % 2 == 0) {(token,,,,,) = config.s_activeChainConfig();}
+        else {(,token,,,,) = config.s_activeChainConfig();}
         uint256 maxTokenBalance = 1e9; // 1 billion collateral tokens, arbitrary limit to prevent math overflow
         depositAmount = bound(depositAmount,1,maxTokenBalance);
         redeemAmount = bound(redeemAmount,depositAmount+1,type(uint256).max);
@@ -932,39 +836,16 @@ contract DSCEngineTest is Test {
         vm.prank(USER);
         engine.redeemCollateral(token,redeemAmount);
     }
-    function testRedeemOutsideRedeemLimitsWeth(
+    function testRedeemOutsideRedeemLimits(
+        uint256 tokenSeed,
         uint256 redeemAmount,
         uint256 depositAmount,
         uint256 mintAmount
         ) external skipIfNotOnAnvil 
     {
-        (address token,,,,,) = config.s_activeChainConfig();
-        _redeemOutsideRedeemLimits(
-            token,
-            redeemAmount,
-            depositAmount,
-            mintAmount);
-    }
-    function testRedeemOutsideRedeemLimitsWbtc(
-        uint256 redeemAmount,
-        uint256 depositAmount,
-        uint256 mintAmount
-        ) external skipIfNotOnAnvil 
-    {
-        (,address token,,,,) = config.s_activeChainConfig();
-        _redeemOutsideRedeemLimits(
-            token,
-            redeemAmount,
-            depositAmount,
-            mintAmount);
-    }
-    function _redeemOutsideRedeemLimits(
-        address token,
-        uint256 redeemAmount,
-        uint256 depositAmount,
-        uint256 mintAmount
-        ) internal
-    {
+        address token;
+        if (tokenSeed % 2 == 0) {(token,,,,,) = config.s_activeChainConfig();}
+        else {(,token,,,,) = config.s_activeChainConfig();}
         uint256 maxTokenBalance = 1e9; // 1 billion collateral tokens, arbitrary limit to prevent math overflow
         depositAmount = bound(depositAmount,1,maxTokenBalance);
         // mint collateral token to USER
@@ -977,16 +858,16 @@ contract DSCEngineTest is Test {
         vm.stopPrank();
         // calc max mint amount given specific deposit amount
         uint256 maxMintAmount = engine.exposegetValueOfDepositsInUsd(USER) 
-            * engine.getThresholdLimitPercent() 
-            / engine.getFractionRemovalMultiplier();
+            * engine.i_thresholdLimitPercent() 
+            / engine.FRACTION_REMOVAL_MULTIPLIER();
         mintAmount = bound(mintAmount,1,maxMintAmount);
         // USER mints (aka takes on debt from system)
         vm.prank(USER);
         engine.mintDSC(mintAmount);
         // bound redeemAmount to be outside of redeem limit but within deposit amount
         uint256 maxSafeRedeemAmount = (maxMintAmount - mintAmount) 
-                * engine.getFractionRemovalMultiplier() 
-                / engine.getThresholdLimitPercent();
+                * engine.FRACTION_REMOVAL_MULTIPLIER() 
+                / engine.i_thresholdLimitPercent();
         maxSafeRedeemAmount = engine.convertFromUsd(maxSafeRedeemAmount,token);
         redeemAmount = bound(
             redeemAmount,
@@ -1002,39 +883,16 @@ contract DSCEngineTest is Test {
         vm.prank(USER);
         engine.redeemCollateral(token,redeemAmount);
     }
-    function testRedeemStateCorrectlyUpdatedWeth(
+    function testRedeemStateCorrectlyUpdated(
+        uint256 tokenSeed,
         uint256 redeemAmount,
         uint256 depositAmount,
         uint256 mintAmount
         ) external skipIfNotOnAnvil 
     {
-        (address token,,,,,) = config.s_activeChainConfig();
-        _redeemStateCorrectlyUpdated(
-            token,
-            redeemAmount,
-            depositAmount,
-            mintAmount);
-    }
-    function testRedeemStateCorrectlyUpdatedWbtc(
-        uint256 redeemAmount,
-        uint256 depositAmount,
-        uint256 mintAmount
-        ) external skipIfNotOnAnvil 
-    {
-        (,address token,,,,) = config.s_activeChainConfig();
-        _redeemStateCorrectlyUpdated(
-            token,
-            redeemAmount,
-            depositAmount,
-            mintAmount);
-    }
-    function _redeemStateCorrectlyUpdated(
-        address token,
-        uint256 redeemAmount,
-        uint256 depositAmount,
-        uint256 mintAmount
-        ) internal
-    {
+        address token;
+        if (tokenSeed % 2 == 0) {(token,,,,,) = config.s_activeChainConfig();}
+        else {(,token,,,,) = config.s_activeChainConfig();}
         uint256 maxTokenBalance = 1e9; // 1 billion collateral tokens, arbitrary limit to prevent math overflow
         // bound deposit amount to within max token balance
         depositAmount = bound(depositAmount,1,maxTokenBalance);
@@ -1048,8 +906,8 @@ contract DSCEngineTest is Test {
         vm.stopPrank();
         // calc max mint amount allowed by system given specific deposit amount
         uint256 maxMintAmount = engine.exposegetValueOfDepositsInUsd(USER) 
-            * engine.getThresholdLimitPercent() 
-            / engine.getFractionRemovalMultiplier();
+            * engine.i_thresholdLimitPercent() 
+            / engine.FRACTION_REMOVAL_MULTIPLIER();
         // bound mint amount to within max mint amount allowed
         mintAmount = bound(mintAmount,1,maxMintAmount);
         // USER mints (aka takes on debt from system)
@@ -1058,8 +916,8 @@ contract DSCEngineTest is Test {
         // calc max redeem amount allowed by system given specific deposit amount 
         //  and specific mint amount
         uint256 maxSafeRedeemAmount = (maxMintAmount - mintAmount) 
-                * engine.getFractionRemovalMultiplier() 
-                / engine.getThresholdLimitPercent();
+                * engine.FRACTION_REMOVAL_MULTIPLIER() 
+                / engine.i_thresholdLimitPercent();
         maxSafeRedeemAmount = engine.convertFromUsd(maxSafeRedeemAmount,token);
         // bound redeemAmount to be within max redeem amount allowed
         // restart run if maxSafeRedeemAmount < 1, as this will cause the redeemAmount bound to fail
@@ -1127,44 +985,17 @@ contract DSCEngineTest is Test {
         engine.burnDSC(burnAmount);
         vm.stopPrank();
     }
-    function testBurnStateCorrectlyUpdatedWeth(
+    function testBurnStateCorrectlyUpdated(
+        uint256 tokenSeed,
         address burner,
         uint256 burnAmount,
         uint256 depositAmount,
         uint256 mintAmount
         ) external skipIfNotOnAnvil 
     {
-        (address depositToken,,,,,) = config.s_activeChainConfig();
-        BurnStateCorrectlyUpdated(
-            burner,
-            burnAmount,
-            depositToken,
-            depositAmount,
-            mintAmount);
-    }
-    function testBurnStateCorrectlyUpdatedWbtc(
-        address burner,
-        uint256 burnAmount,
-        uint256 depositAmount,
-        uint256 mintAmount
-        ) external skipIfNotOnAnvil 
-    {
-        (,address depositToken,,,,) = config.s_activeChainConfig();
-        BurnStateCorrectlyUpdated(
-            burner,
-            burnAmount,
-            depositToken,
-            depositAmount,
-            mintAmount);
-    }
-    function BurnStateCorrectlyUpdated(
-        address burner,
-        uint256 burnAmount,
-        address depositToken,
-        uint256 depositAmount,
-        uint256 mintAmount
-        ) internal
-    {
+        address depositToken;
+        if (tokenSeed % 2 == 0) {(depositToken,,,,,) = config.s_activeChainConfig();}
+        else {(,depositToken,,,,) = config.s_activeChainConfig();}
         vm.assume(burner != address(0));
         // setup
         //  1. mint collateral tokens for burner to deposit
@@ -1172,8 +1003,8 @@ contract DSCEngineTest is Test {
         uint256 maxDepositAmount = 1e9;    // 1 billion collateral tokens, arbitrary limit to avoid math overflow
         depositAmount = bound(depositAmount,1,maxDepositAmount);
         uint256 maxMintAmount = engine.convertToUsd(depositToken,depositAmount) 
-            * engine.getThresholdLimitPercent() 
-            / engine.getFractionRemovalMultiplier();
+            * engine.i_thresholdLimitPercent() 
+            / engine.FRACTION_REMOVAL_MULTIPLIER();
         mintAmount = bound(mintAmount,1,maxMintAmount);
         burnAmount = bound(burnAmount,1,mintAmount);
         ERC20Mock(depositToken).mint(burner,depositAmount);
@@ -1289,8 +1120,8 @@ contract DSCEngineTest is Test {
         vm.assume(liquidateTarget != USER); // USER is the liquidator who calls liquidate()
         uint256 maxDepositAmount = 1e9; // 1 billion collateral tokens
         depositAmount = bound(depositAmount,1,maxDepositAmount);
-        uint256 threshold = engine.getThresholdLimitPercent();
-        uint256 fractional = engine.getFractionRemovalMultiplier();
+        uint256 threshold = engine.i_thresholdLimitPercent();
+        uint256 fractional = engine.FRACTION_REMOVAL_MULTIPLIER();
         uint256 valueOfDeposits = engine.convertToUsd(token,depositAmount);
         uint256 maxMintAmount = valueOfDeposits * threshold / fractional;
         mintAmount = bound(mintAmount,1,maxMintAmount);
@@ -1327,8 +1158,8 @@ contract DSCEngineTest is Test {
         uint256 maxDepositAmount = 1e9; // 1 billion collateral tokens
         depositAmountWeth = bound(depositAmountWeth,1,maxDepositAmount);
         depositAmountWbtc = bound(depositAmountWbtc,1,maxDepositAmount-depositAmountWeth+1);
-        uint256 threshold = engine.getThresholdLimitPercent();
-        uint256 fractional = engine.getFractionRemovalMultiplier();
+        uint256 threshold = engine.i_thresholdLimitPercent();
+        uint256 fractional = engine.FRACTION_REMOVAL_MULTIPLIER();
         uint256 valueOfDeposits = engine.convertToUsd(weth,depositAmountWeth) 
             + engine.convertToUsd(wbtc,depositAmountWbtc);
         uint256 maxMintAmount = valueOfDeposits * threshold / fractional;
@@ -1379,8 +1210,8 @@ contract DSCEngineTest is Test {
             uint256 maxDepositAmount = 1e9; // 1 billion collateral tokens
             depositAmountWeth = bound(depositAmountWeth,1,maxDepositAmount);
             depositAmountWbtc = bound(depositAmountWbtc,1,maxDepositAmount-depositAmountWeth+1);
-            uint256 threshold = engine.getThresholdLimitPercent();
-            uint256 fractional = engine.getFractionRemovalMultiplier();
+            uint256 threshold = engine.i_thresholdLimitPercent();
+            uint256 fractional = engine.FRACTION_REMOVAL_MULTIPLIER();
             uint256 valueOfDeposits = engine.convertToUsd(weth,depositAmountWeth) 
                 + engine.convertToUsd(wbtc,depositAmountWbtc);
             uint256 maxMintAmount = valueOfDeposits * threshold / fractional;
@@ -1559,44 +1390,17 @@ contract DSCEngineTest is Test {
                 token));
         engine.expose_redeemCollateral(from,to,token,amount);
     }
-    function test_redeemInsufficientBalanceWeth(
+    function test_redeemInsufficientBalance(
+        uint256 tokenSeed,
         address from,
         address to,
         uint256 redeemAmount,
         uint256 depositAmount
         ) external skipIfNotOnAnvil 
     {
-        (address token,,,,,) = config.s_activeChainConfig();
-        _redeemInsufficientBalance(
-            from,
-            to,
-            token,
-            redeemAmount,
-            depositAmount);
-    }
-    function test_redeemInsufficientBalanceWbtc(
-        address from,
-        address to,
-        uint256 redeemAmount,
-        uint256 depositAmount
-        ) external skipIfNotOnAnvil 
-    {
-        (,address token,,,,) = config.s_activeChainConfig();
-        _redeemInsufficientBalance(
-            from,
-            to,
-            token,
-            redeemAmount,
-            depositAmount);
-    }
-    function _redeemInsufficientBalance(
-        address from,
-        address to,
-        address token,
-        uint256 redeemAmount,
-        uint256 depositAmount
-        ) internal
-    {
+        address token;
+        if (tokenSeed % 2 == 0) {(token,,,,,) = config.s_activeChainConfig();}
+        else {(,token,,,,) = config.s_activeChainConfig();}
         uint256 maxTokenBalance = 1e9; // 1 billion collateral tokens, arbitrary limit to prevent math overflow
         depositAmount = bound(depositAmount,1,maxTokenBalance);
         redeemAmount = bound(redeemAmount,depositAmount+1,type(uint256).max);
@@ -1620,8 +1424,8 @@ contract DSCEngineTest is Test {
                 redeemAmount));
         engine.expose_redeemCollateral(from,to,token,redeemAmount);
     }
-
-    function test_redeemOutsideRedeemLimitsWeth(
+    function test_redeemOutsideRedeemLimits(
+        uint256 tokenSeed,
         address from,
         address to,
         uint256 redeemAmount,
@@ -1629,41 +1433,9 @@ contract DSCEngineTest is Test {
         uint256 mintAmount
         ) external skipIfNotOnAnvil 
     {
-        (address token,,,,,) = config.s_activeChainConfig();
-        _redeemOutsideRedeemLimits(
-            from,
-            to,
-            token,
-            redeemAmount,
-            depositAmount,
-            mintAmount);
-    }
-    function test_redeemOutsideRedeemLimitsWbtc(
-        address from,
-        address to,
-        uint256 redeemAmount,
-        uint256 depositAmount,
-        uint256 mintAmount
-        ) external skipIfNotOnAnvil 
-    {
-        (,address token,,,,) = config.s_activeChainConfig();
-        _redeemOutsideRedeemLimits(
-            from,
-            to,
-            token,
-            redeemAmount,
-            depositAmount,
-            mintAmount);
-    }
-    function _redeemOutsideRedeemLimits(
-        address from,
-        address to,
-        address token,
-        uint256 redeemAmount,
-        uint256 depositAmount,
-        uint256 mintAmount
-        ) internal
-    {
+        address token;
+        if (tokenSeed % 2 == 0) {(token,,,,,) = config.s_activeChainConfig();}
+        else {(,token,,,,) = config.s_activeChainConfig();}
         uint256 maxTokenBalance = 1e9; // 1 billion collateral tokens, arbitrary limit to prevent math overflow
         depositAmount = bound(depositAmount,1,maxTokenBalance);
         vm.assume(from != address(0));
@@ -1678,16 +1450,16 @@ contract DSCEngineTest is Test {
         vm.stopPrank();
         // calc max mint amount given specific deposit amount
         uint256 maxMintAmount = engine.exposegetValueOfDepositsInUsd(from) 
-            * engine.getThresholdLimitPercent() 
-            / engine.getFractionRemovalMultiplier();
+            * engine.i_thresholdLimitPercent() 
+            / engine.FRACTION_REMOVAL_MULTIPLIER();
         mintAmount = bound(mintAmount,1,maxMintAmount);
         // fromuser mints (aka takes on debt from system)
         vm.prank(from);
         engine.mintDSC(mintAmount);
         // bound redeemAmount to be outside of redeem limit but within deposit amount
         uint256 maxSafeRedeemAmount = (maxMintAmount - mintAmount) 
-                * engine.getFractionRemovalMultiplier() 
-                / engine.getThresholdLimitPercent();
+                * engine.FRACTION_REMOVAL_MULTIPLIER() 
+                / engine.i_thresholdLimitPercent();
         maxSafeRedeemAmount = engine.convertFromUsd(maxSafeRedeemAmount,token);
         redeemAmount = bound(
             redeemAmount,
@@ -1702,114 +1474,60 @@ contract DSCEngineTest is Test {
                 maxSafeRedeemAmount));
         engine.expose_redeemCollateral(from,to,token,redeemAmount);
     }
+    function test_redeemStateCorrectlyUpdated(
+        uint256 tokenSeed,
+        address from,
+        address to,
+        uint256 redeemAmount,
+        uint256 depositAmount,
+        uint256 mintAmount
+        ) external skipIfNotOnAnvil 
+    {
+        address token;
+        {
+            if (tokenSeed % 2 == 0) {(token,,,,,) = config.s_activeChainConfig();}
+            else {(,token,,,,) = config.s_activeChainConfig();}
+            vm.assume(from != address(0));
+            vm.assume(to != address(0));
+            // these following 3 restrictions are NEEDED; never dreamed they would come up but yeah they do
+            vm.assume(from != to);
+            vm.assume(from != address(engine));
+            vm.assume(to != address(engine));
+            uint256 maxTokenBalance = 1e9; // 1 billion collateral tokens, arbitrary limit to prevent math overflow
+            // bound deposit amount to within max token balance
+            depositAmount = bound(depositAmount,1,maxTokenBalance);
+            // mint collateral token to fromuser
+            ERC20Mock(token).mint(from,depositAmount);
+            // fromuser approves sufficient allowance to engine to perform the collateral token transfer during the deposit
+            vm.startPrank(from);
+            ERC20Mock(token).approve(address(engine),depositAmount);
+            // fromuser deposits collateral into system
+            engine.depositCollateral(token,depositAmount);
+            vm.stopPrank();
+            // calc max mint amount allowed by system given specific deposit amount
+            uint256 threshold = engine.i_thresholdLimitPercent();
+            uint256 fractional = engine.FRACTION_REMOVAL_MULTIPLIER();
+            uint256 depositValue = engine.exposegetValueOfDepositsInUsd(from);
+            uint256 maxMintAmount = depositValue * threshold / fractional;
+            // bound mint amount to within max mint amount allowed
+            mintAmount = bound(mintAmount,1,maxMintAmount);
+            // fromuser mints (aka takes on debt from system)
+            vm.prank(from);
+            engine.mintDSC(mintAmount);
+            // calc max redeem amount allowed by system given specific deposit amount 
+            //  and specific mint amount
+            //  (deposit value - max redeem value) * threshold / fractional = mint value
+            //  max redeem value = deposit value - mint value * fractional / threshold
+            //  max redeem amount = convertFromUsd(deposit value - mint value * fractional / threshold)
+            uint256 maxSafeRedeemAmount = 
+                engine.convertFromUsd(depositValue - mintAmount * fractional / threshold,token);
+            // bound redeemAmount to be within max redeem amount allowed
+            // restart run if maxSafeRedeemAmount < 1, as this will cause the bound
+            //  to fail
+            vm.assume(maxSafeRedeemAmount > 0);
+            redeemAmount = bound(redeemAmount,1,maxSafeRedeemAmount);
+        }
 
-    function test_redeemStateCorrectlyUpdatedWeth(
-        address from,
-        address to,
-        uint256 redeemAmount,
-        uint256 depositAmount,
-        uint256 mintAmount
-        ) external skipIfNotOnAnvil 
-    {
-        (address token,,,,,) = config.s_activeChainConfig();
-        _redeemStateCorrectlyUpdated(
-            from,
-            to,
-            token,
-            redeemAmount,
-            depositAmount,
-            mintAmount);
-    }
-    function test_redeemStateCorrectlyUpdatedWbtc(
-        address from,
-        address to,
-        uint256 redeemAmount,
-        uint256 depositAmount,
-        uint256 mintAmount
-        ) external skipIfNotOnAnvil 
-    {
-        (,address token,,,,) = config.s_activeChainConfig();
-        _redeemStateCorrectlyUpdated(
-            from,
-            to,
-            token,
-            redeemAmount,
-            depositAmount,
-            mintAmount);
-    }
-    function Setup_redeemStateCorrectlyUpdated(
-        address from,
-        address token,
-        uint256 redeemAmount,
-        uint256 depositAmount,
-        uint256 mintAmount
-        ) internal returns(uint256 redeemAmountReturn)
-    {
-        uint256 maxTokenBalance = 1e9; // 1 billion collateral tokens, arbitrary limit to prevent math overflow
-        // bound deposit amount to within max token balance
-        depositAmount = bound(depositAmount,1,maxTokenBalance);
-        // mint collateral token to fromuser
-        ERC20Mock(token).mint(from,depositAmount);
-        // fromuser approves sufficient allowance to engine to perform the collateral token transfer during the deposit
-        vm.startPrank(from);
-        ERC20Mock(token).approve(address(engine),depositAmount);
-        // fromuser deposits collateral into system
-        engine.depositCollateral(token,depositAmount);
-        vm.stopPrank();
-        // calc max mint amount allowed by system given specific deposit amount
-        uint256 threshold = engine.getThresholdLimitPercent();
-        uint256 fractional = engine.getFractionRemovalMultiplier();
-        uint256 depositValue = engine.exposegetValueOfDepositsInUsd(from);
-        uint256 maxMintAmount = depositValue * threshold / fractional;
-        // bound mint amount to within max mint amount allowed
-        mintAmount = bound(mintAmount,1,maxMintAmount);
-        // fromuser mints (aka takes on debt from system)
-        vm.prank(from);
-        engine.mintDSC(mintAmount);
-        // calc max redeem amount allowed by system given specific deposit amount 
-        //  and specific mint amount
-        //  (deposit value - max redeem value) * threshold / fractional = mint value
-        //  max redeem value = deposit value - mint value * fractional / threshold
-        //  max redeem amount = convertFromUsd(deposit value - mint value * fractional / threshold)
-        uint256 maxSafeRedeemAmount = 
-            engine.convertFromUsd(depositValue - mintAmount * fractional / threshold,token);
-        /* wrong calc
-        uint256 maxSafeRedeemAmount = (maxMintAmount - mintAmount) 
-                * engine.getFractionRemovalMultiplier() 
-                / engine.getThresholdLimitPercent();
-        maxSafeRedeemAmount = engine.convertFromUsd(maxSafeRedeemAmount,token);
-        */
-        // bound redeemAmount to be within max redeem amount allowed
-        // restart run if maxSafeRedeemAmount < 1, as this will cause the bound
-        //  to fail
-        vm.assume(maxSafeRedeemAmount > 0);
-        //if (maxSafeRedeemAmount < 1) return;
-        redeemAmount = bound(redeemAmount,1,maxSafeRedeemAmount);
-        // restart run if redeem amount is 0
-        //vm.assume(redeemAmount != 0);
-        return (redeemAmount);
-    }
-    function _redeemStateCorrectlyUpdated(
-        address from,
-        address to,
-        address token,
-        uint256 redeemAmount,
-        uint256 depositAmount,
-        uint256 mintAmount
-        ) internal
-    {
-        vm.assume(from != address(0));
-        vm.assume(to != address(0));
-        // these following 3 restrictions are NEEDED; never dreamed they would come up but yeah they do
-        vm.assume(from != to);
-        vm.assume(from != address(engine));
-        vm.assume(to != address(engine));
-        uint256 redeemAmountReturn = Setup_redeemStateCorrectlyUpdated(
-            from,
-            token,
-            redeemAmount,
-            depositAmount,
-            mintAmount);
         // perform redemption and do the tests:
         //  1. check for emit
         //  2. check that fromuser deposit is drawn down by redeem amount
@@ -1821,16 +1539,16 @@ contract DSCEngineTest is Test {
         uint256 touserTokenBalanceBeforeRedeem = ERC20Mock(token).balanceOf(to);
         // check for emit
         vm.expectEmit(true,true,true,false,address(engine));
-        emit DSCEngine.CollateralRedeemed(from,token,redeemAmountReturn);
-        engine.expose_redeemCollateral(from,to,token,redeemAmountReturn);
+        emit DSCEngine.CollateralRedeemed(from,token,redeemAmount);
+        engine.expose_redeemCollateral(from,to,token,redeemAmount);
         // check that fromuser deposit is drawn down by redeem amount
         vm.startPrank(from);
-        assertEq(engine.getDepositAmount(token),depositAmountBeforeRedeem - redeemAmountReturn);
+        assertEq(engine.getDepositAmount(token),depositAmountBeforeRedeem - redeemAmount);
         vm.stopPrank();
         // check that engine collateral token balance is drawn down by redeem amount
-        assertEq(ERC20Mock(token).balanceOf(address(engine)),engineTokenBalanceBeforeRedeem - redeemAmountReturn);
+        assertEq(ERC20Mock(token).balanceOf(address(engine)),engineTokenBalanceBeforeRedeem - redeemAmount);
         // check that tomuser collateral token balance is increased by redeem amount
-        assertEq(ERC20Mock(token).balanceOf(to),touserTokenBalanceBeforeRedeem + redeemAmountReturn);
+        assertEq(ERC20Mock(token).balanceOf(to),touserTokenBalanceBeforeRedeem + redeemAmount);
     }
 
     ////////////////////////////////////////////////////////////////////
@@ -1891,7 +1609,8 @@ contract DSCEngineTest is Test {
             onBehalfOf,
             burnAmount);
     }
-    function test_burnStateCorrectlyUpdatedWeth(
+    function test_burnStateCorrectlyUpdated(
+        uint256 tokenSeed,
         uint256 amountDSCTokensHeld,
         uint256 amountDSCMintDebt,
         uint256 burnAmount,
@@ -1900,102 +1619,68 @@ contract DSCEngineTest is Test {
         address onBehalfOf
         ) external skipIfNotOnAnvil 
     {
-        (address token,,,,,) = config.s_activeChainConfig();
-        _burnStateCorrectlyUpdated(
-            token,
-            amountDSCTokensHeld,
-            amountDSCMintDebt,
-            burnAmount,
-            depositAmount,
-            dscFrom,
-            onBehalfOf);
-    }
-    function test_burnStateCorrectlyUpdatedWbtc(
-        uint256 amountDSCTokensHeld,
-        uint256 amountDSCMintDebt,
-        uint256 burnAmount,
-        uint256 depositAmount,
-        address dscFrom,
-        address onBehalfOf
-        ) external skipIfNotOnAnvil 
-    {
-        (,address token,,,,) = config.s_activeChainConfig();
-        _burnStateCorrectlyUpdated(
-            token,
-            amountDSCTokensHeld,
-            amountDSCMintDebt,
-            burnAmount,
-            depositAmount,
-            dscFrom,
-            onBehalfOf);
-    }
-    function _burnStateCorrectlyUpdated(
-        address token,
-        uint256 amountDSCTokensHeld,
-        uint256 amountDSCMintDebt,
-        uint256 burnAmount,
-        uint256 depositAmount,
-        address dscFrom,
-        address onBehalfOf
-        ) internal
-    {
-        // setup
-        //  1. mint enough DSC tokens for dscFrom to burn
-        //  2. dscFrom approves sufficient allowance to engine for burn amount
-        //  3. mint enough collateral tokens for onBehalfOf to deposit
-        //  4. onBehalfOf deposits collaterals and mints DSC (aka take on debt) for 
-        //      the liquidation burn
-        vm.assume(dscFrom != address(0));
-        vm.assume(onBehalfOf != address(0));
-        vm.assume(dscFrom != onBehalfOf);
-        uint256 maxDSCTokensHeld = 1e9;    // 1 billion DSC tokens, arbitrary limit to avoid math overflow
-        amountDSCTokensHeld = bound(amountDSCTokensHeld,3,maxDSCTokensHeld);
-        amountDSCMintDebt = bound(amountDSCMintDebt,2,amountDSCTokensHeld);
-        burnAmount = bound(burnAmount,1,amountDSCMintDebt);
-        // mint DSC tokens for dscFrom to burn
-        //  note that engine is the one to call DecentralizedStableCoin.mint(), because it has an owner 
-        //  restriction, and that the engine is the owner of DecentralizedStableCoin. 
-        //  hence this pranking of the engine is needed for this mint
-        vm.prank(address(engine));
-        coin.mint(dscFrom,amountDSCTokensHeld);
-        // dscFrom approves sufficient allowance to engine for burn amount
-        //  approval definitely needs pranking of dscFrom
-        vm.prank(dscFrom);
-        coin.approve(address(engine),amountDSCTokensHeld);
-        assertEq(
-            coin.balanceOf(dscFrom),
-            amountDSCTokensHeld);
-        assertGe(amountDSCTokensHeld,burnAmount);
-        assertGe(coin.allowance(dscFrom,address(engine)),burnAmount);
+        address token;
+        {
+            if (tokenSeed % 2 == 0) {(token,,,,,) = config.s_activeChainConfig();}
+            else {(,token,,,,) = config.s_activeChainConfig();}
+            // setup
+            //  1. mint enough DSC tokens for dscFrom to burn
+            //  2. dscFrom approves sufficient allowance to engine for burn amount
+            //  3. mint enough collateral tokens for onBehalfOf to deposit
+            //  4. onBehalfOf deposits collaterals and mints DSC (aka take on debt) for 
+            //      the liquidation burn
+            vm.assume(dscFrom != address(0));
+            vm.assume(onBehalfOf != address(0));
+            vm.assume(dscFrom != onBehalfOf);
+            uint256 maxDSCTokensHeld = 1e9;    // 1 billion DSC tokens, arbitrary limit to avoid math overflow
+            amountDSCTokensHeld = bound(amountDSCTokensHeld,3,maxDSCTokensHeld);
+            amountDSCMintDebt = bound(amountDSCMintDebt,2,amountDSCTokensHeld);
+            burnAmount = bound(burnAmount,1,amountDSCMintDebt);
+            // mint DSC tokens for dscFrom to burn
+            //  note that engine is the one to call DecentralizedStableCoin.mint(), because it has an owner 
+            //  restriction, and that the engine is the owner of DecentralizedStableCoin. 
+            //  hence this pranking of the engine is needed for this mint
+            vm.prank(address(engine));
+            coin.mint(dscFrom,amountDSCTokensHeld);
+            // dscFrom approves sufficient allowance to engine for burn amount
+            //  approval definitely needs pranking of dscFrom
+            vm.prank(dscFrom);
+            coin.approve(address(engine),amountDSCTokensHeld);
+            assertEq(
+                coin.balanceOf(dscFrom),
+                amountDSCTokensHeld);
+            assertGe(amountDSCTokensHeld,burnAmount);
+            assertGe(coin.allowance(dscFrom,address(engine)),burnAmount);
 
-        uint256 minDepositValueNeeded = 1 + amountDSCMintDebt 
-            * engine.getFractionRemovalMultiplier() 
-            / engine.getThresholdLimitPercent();
-        uint256 maxDepositValueNeeded = 1 + amountDSCTokensHeld 
-            * engine.getFractionRemovalMultiplier() 
-            / engine.getThresholdLimitPercent();
-        uint256 minDepositAmountNeeded = 1 + engine.convertFromUsd(minDepositValueNeeded,token);
-        uint256 maxDepositAmountNeeded = 1 + engine.convertFromUsd(maxDepositValueNeeded,token);
-        depositAmount = bound(depositAmount,minDepositAmountNeeded,maxDepositAmountNeeded);
-        // mint enough ETH tokens for onBehalfOf to deposit as collaterals
-        //  minting here doesn't need pranking because ERC20Mock.mint() doesn't have an owner 
-        //  restriction
-        ERC20Mock(token).mint(onBehalfOf,depositAmount);
-        // onBehalfOf approves a sufficient allowance for the engine to transfer during deposit
-        //  approval definitely needs pranking of onBehalfOf
-        vm.startPrank(onBehalfOf);
-        ERC20Mock(token).approve(address(engine),depositAmount);
-        // onBehalfOf deposits the ETH (ie: onBehalfOf calls depositCollateral())
-        //  note that in the deposit process, it is the engine that does the transfer of tokens 
-        //  from onBehalfOf to the engine itself, hence the earlier approval by onBehalfOf to
-        //  the engine for the deposit amount was needed
-        engine.depositCollateral(token,depositAmount);
-        // and mints DSC (aka take on debt) for the liquidation burn
-        //  note that it is also onBehalfOf that calls mintDSC()
-        engine.mintDSC(amountDSCMintDebt);
-        assertEq(depositAmount,engine.getDepositAmount(token));
-        assertEq(amountDSCMintDebt,engine.getMints());
-        vm.stopPrank();
+            uint256 minDepositValueNeeded = 1 + amountDSCMintDebt 
+                * engine.FRACTION_REMOVAL_MULTIPLIER() 
+                / engine.i_thresholdLimitPercent();
+            uint256 maxDepositValueNeeded = 1 + amountDSCTokensHeld 
+                * engine.FRACTION_REMOVAL_MULTIPLIER() 
+                / engine.i_thresholdLimitPercent();
+            uint256 minDepositAmountNeeded = 1 + engine.convertFromUsd(minDepositValueNeeded,token);
+            uint256 maxDepositAmountNeeded = 1 + engine.convertFromUsd(maxDepositValueNeeded,token);
+            depositAmount = bound(depositAmount,minDepositAmountNeeded,maxDepositAmountNeeded);
+            // mint enough ETH tokens for onBehalfOf to deposit as collaterals
+            //  minting here doesn't need pranking because ERC20Mock.mint() doesn't have an owner 
+            //  restriction
+            ERC20Mock(token).mint(onBehalfOf,depositAmount);
+            // onBehalfOf approves a sufficient allowance for the engine to transfer during deposit
+            //  approval definitely needs pranking of onBehalfOf
+            vm.startPrank(onBehalfOf);
+            ERC20Mock(token).approve(address(engine),depositAmount);
+            // onBehalfOf deposits the ETH (ie: onBehalfOf calls depositCollateral())
+            //  note that in the deposit process, it is the engine that does the transfer of tokens 
+            //  from onBehalfOf to the engine itself, hence the earlier approval by onBehalfOf to
+            //  the engine for the deposit amount was needed
+            engine.depositCollateral(token,depositAmount);
+            // and mints DSC (aka take on debt) for the liquidation burn
+            //  note that it is also onBehalfOf that calls mintDSC()
+            engine.mintDSC(amountDSCMintDebt);
+            assertEq(depositAmount,engine.getDepositAmount(token));
+            assertEq(amountDSCMintDebt,engine.getMints());
+            vm.stopPrank();
+        }
 
         // start the burn and do the tests
         //  1. check for emit
@@ -2277,21 +1962,6 @@ contract DSCEngineTest is Test {
             vm.envUint("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD") * randomAmount 
                 / (10**(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_BTC_USD"))));
     }
-
-    ////////////////////////////////////////////////////////////////////
-    // Unit tests for getFractionRemovalMultiplier()
-    // Skipped. This function just returns a constant.
-    ////////////////////////////////////////////////////////////////////
-
-    ////////////////////////////////////////////////////////////////////
-    // Unit tests for getDscTokenAddress()
-    // Skipped. This function just returns an immutable.
-    ////////////////////////////////////////////////////////////////////
-
-    ////////////////////////////////////////////////////////////////////
-    // Unit tests for getThresholdLimitPercent()
-    // Skipped. This function just returns an immutable.
-    ////////////////////////////////////////////////////////////////////
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for getAllowedCollateralTokensArrayLength()

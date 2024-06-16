@@ -39,13 +39,13 @@ contract DeployDSCEngineTest is Test {
         testEngineDeployer.run(address(0));
     }
     function testValidDscToken() external view {
-        assert(engine.getDscTokenAddress() == address(coin));
+        assert(engine.i_dscToken() == address(coin));
     }
     function testThresholdPercentWithinRange() external view {
-        assert((engine.getThresholdLimitPercent() >= 1) && (engine.getThresholdLimitPercent() <= 99));
+        assert((engine.i_thresholdLimitPercent() >= 1) && (engine.i_thresholdLimitPercent() <= 99));
     }
     function testValidThresholdPercent() external view {
-        assert(engine.getThresholdLimitPercent() == vm.envUint("THRESHOLD_PERCENT"));
+        assert(engine.i_thresholdLimitPercent() == vm.envUint("THRESHOLD_PERCENT"));
     }
     function testDeployInSepoliaWithCorrectAllowedCollateralTokensAndPriceFeeds() external view onlySepolia {
         console.log("Passed onlySepolia");
