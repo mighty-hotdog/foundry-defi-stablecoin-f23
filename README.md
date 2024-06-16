@@ -144,10 +144,10 @@ Wrote alot of Solidity. Learned a ton doing this course.
 * Gained a rudimentary grasp of smart contracts security.
 
 # Outstanding Tasks
-1. Final bit of the tests for liquidate().
-2. Update the deploy scripts.
+1. ~~Final bit of the tests for liquidate().~~ DONE
+2. ~~Update the deploy scripts.~~ DONE
 3. Do up the Makefile, especially for:
-    * deployment onchain
+    * ~~deployment onchain~~ DONE
     * easy test deployment and tests running
     * using tools like Slither, SMT Checker, etc
-4. Update the .env file with testing and deployment accounts info, eg: SEPOLIA_TESTNET_KEY_SENDER, PASSWORD_FILE
+4. ~~Update the .env file with testing and deployment accounts info, eg: SEPOLIA_TESTNET_KEY_SENDER, PASSWORD_FILE~~ DONE

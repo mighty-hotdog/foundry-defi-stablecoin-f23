@@ -80,8 +80,20 @@ contract ChainConfigurator is Script {
         ERC20Mock mockWETH = new ERC20Mock();
         ERC20Mock mockWBTC = new ERC20Mock();
         // deploy mock Chainlink AggregatorV3Interface for wETH and wBTC pricefeeds
-        MockAggregatorV3 mockEthPriceFeed = new MockAggregatorV3("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD");
-        MockAggregatorV3 mockBtcPriceFeed = new MockAggregatorV3("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD");
+        MockAggregatorV3 mockEthPriceFeed = new MockAggregatorV3(
+            MockAggregatorV3.ConstructorParams({
+                description: vm.envString("CHAINLINK_MOCK_PRICE_FEED_DESCRIPTION"),
+                version: vm.envUint("CHAINLINK_MOCK_PRICE_FEED_VERSION"),
+                decimals: uint8(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_ETH_USD")),
+                answer: vm.envInt("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD")
+            }));
+        MockAggregatorV3 mockBtcPriceFeed = new MockAggregatorV3(
+            MockAggregatorV3.ConstructorParams({
+                description: vm.envString("CHAINLINK_MOCK_PRICE_FEED_DESCRIPTION"),
+                version: vm.envUint("CHAINLINK_MOCK_PRICE_FEED_VERSION"),
+                decimals: uint8(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_BTC_USD")),
+                answer: vm.envInt("CHAINLINK_MOCK_PRICE_FEED_ANSWER_BTC_USD")
+            }));
         vm.stopBroadcast();
         return ChainConfig({
             wETH: address(mockWETH),

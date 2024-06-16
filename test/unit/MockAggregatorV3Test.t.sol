@@ -13,9 +13,9 @@ import {MockAggregatorV3} from "../mocks/MockAggregatorV3.sol";
  */
 contract MockAggregatorV3Test is Test, Script {
     MockAggregatorV3 public mock;
+    MockAggregatorV3.ConstructorParams public params;
 
     /* Test Variables to check against */
-    string private constant ENV_LABEL_TO_READ = "CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD";
     int256 private constant priceFeedAnswer = 4000*1e8;     // 4,000 USD * 1e8
                                                             // where 1e8 = precision of Chainlink Price Feed for ETH/USD
     uint8 private constant priceFeedPrecision = 8;
@@ -24,15 +24,19 @@ contract MockAggregatorV3Test is Test, Script {
     
     /* Setup Function */
     function setUp() external {
-        mock = new MockAggregatorV3(ENV_LABEL_TO_READ);
+        mock = new MockAggregatorV3(
+            MockAggregatorV3.ConstructorParams({
+                description: vm.envString("CHAINLINK_MOCK_PRICE_FEED_DESCRIPTION"),
+                version: vm.envUint("CHAINLINK_MOCK_PRICE_FEED_VERSION"),
+                decimals: uint8(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_ETH_USD")),
+                answer: vm.envInt("CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD")
+            }));
     }
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for constructor()
+    // Skipped. Nothing to test.
     ////////////////////////////////////////////////////////////////////
-    function testEnvLabelToRead() external view {
-        assert(vm.envInt(mock.s_envLabelToRead()) == int256(priceFeedAnswer));
-    }
 
     ////////////////////////////////////////////////////////////////////
     // Unit tests for decimals()

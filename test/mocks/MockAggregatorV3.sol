@@ -2,8 +2,6 @@
 
 pragma solidity ^0.8.18;
 
-import {Script} from "forge-std/Script.sol";
-
 /**
  *  @title  MockAggregatorV3
  *  @notice This is a custom mock for the Chainlink AggregatorV3Interface
@@ -11,28 +9,40 @@ import {Script} from "forge-std/Script.sol";
  *  @dev    It implements the function interfaces defined in AggregatorV3Interface.
  *          getRoundData() and latestRoundData() will always return the same values no matter the roundId
  */
-contract MockAggregatorV3 is Script {
-  string public s_envLabelToRead;
-  bool public useAltPrice;
-  int256 public alternatePrice;
+contract MockAggregatorV3 {
+  struct ConstructorParams {
+    string description;
+    uint256 version;
+    uint8 decimals;
+    int256 answer;
+  }
 
-  constructor(string memory envLabelToRead) {
-    s_envLabelToRead = envLabelToRead;
-    useAltPrice = false;
+  string public s_description;
+  uint256 public s_version;
+  uint8 public s_decimals;
+  int256 public s_answer;
+
+  bool public s_useAltAnswer;
+  int256 public s_alternateAnswer;
+
+  constructor(ConstructorParams memory input) {
+    s_description = input.description;
+    s_version = input.version;
+    s_decimals = input.decimals;
+    s_answer = input.answer;
+    s_useAltAnswer = false;
   }
 
   function decimals() external view returns (uint8) {
-    return uint8(vm.envUint("CHAINLINK_MOCK_PRICE_FEED_PRECISION_ETH_USD"));
+    return s_decimals;
   }
 
   function description() external view returns (string memory) {
-    //return "MockAggregatorV3";
-    return vm.envString("CHAINLINK_MOCK_PRICE_FEED_DESCRIPTION");
+    return s_description;
   }
 
   function version() external view returns (uint256) {
-    //return 3;
-    return vm.envUint("CHAINLINK_MOCK_PRICE_FEED_VERSION");
+    return s_version;
   }
 
   function getRoundData(
@@ -44,12 +54,11 @@ contract MockAggregatorV3 is Script {
     uint256 updatedAt, 
     uint80 answeredInRound) 
   {
-    int256 price;
-    if (useAltPrice) {price = alternatePrice;}
-    else {price = vm.envInt(s_envLabelToRead);}
+    if (s_useAltAnswer) {answer = s_alternateAnswer;}
+    else {answer = s_answer;}
     return (
       _roundId,
-      price,
+      answer,
       uint256(1111),
       uint256(2222),
       uint80(1)
@@ -64,12 +73,11 @@ contract MockAggregatorV3 is Script {
         uint256 updatedAt, 
         uint80 answeredInRound)
   {
-    int256 price;
-    if (useAltPrice) {price = alternatePrice;}
-    else {price = vm.envInt(s_envLabelToRead);}
+    if (s_useAltAnswer) {answer = s_alternateAnswer;}
+    else {answer = s_answer;}
     return (
       uint80(1),
-      price,
+      answer,
       uint256(1111),
       uint256(2222),
       uint80(1)
@@ -78,12 +86,12 @@ contract MockAggregatorV3 is Script {
 
   function useAltPriceTrue(int256 altPrice) external 
   {
-    alternatePrice = altPrice;
-    useAltPrice = true;
+    s_alternateAnswer = altPrice;
+    s_useAltAnswer = true;
   }
 
   function useAltPriceFalse() external 
   {
-    useAltPrice = false;
+    s_useAltAnswer = false;
   }
 }
