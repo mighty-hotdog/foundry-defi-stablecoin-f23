@@ -3,11 +3,8 @@
 pragma solidity ^0.8.18;
 
 import {Script} from "forge-std/Script.sol";
-import {console} from "forge-std/Test.sol";
 import {DecentralizedStableCoin} from "../src/DecentralizedStableCoin.sol";
 import {DSCEngine} from "../src/DSCEngine.sol";
-import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
-import {MockAggregatorV3} from "../test/mocks/MockAggregatorV3.sol";
 import {ChainConfigurator} from "./ChainConfigurator.s.sol";
 
 contract DeployDSCEngine is Script {
@@ -37,7 +34,6 @@ contract DeployDSCEngine is Script {
             priceFeedPrecision[0],
             priceFeedPrecision[1]
         ) = chainConfig.s_activeChainConfig();
-        uint256 thresholdPercent = vm.envUint("THRESHOLD_PERCENT");
         // deploy DSCEngine
         vm.startBroadcast();
         DSCEngine engine = new DSCEngine(
@@ -45,7 +41,7 @@ contract DeployDSCEngine is Script {
             collateralTokenPriceFeedAddresses,
             priceFeedPrecision,
             dscToken,
-            thresholdPercent);
+            vm.envUint("THRESHOLD_PERCENT"));
         vm.stopBroadcast();
         // transfer ownership from initial owner to the DSCEngine
         vm.startBroadcast(DecentralizedStableCoin(dscToken).owner());
