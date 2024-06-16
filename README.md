@@ -12,21 +12,27 @@ This project creates a stablecoin with these properties:
 * [foundry](https://getfoundry.sh/)
 
 Installation
-'sudo apt install git-all
-`curl -L https://foundry.paradigm.xyz | bash
+```
+sudo apt install git-all
+curl -L https://foundry.paradigm.xyz | bash
+```
 
 Depending on your Linux distribution, it could also be:
-'sudo dnf install git-all
-`curl -L https://foundry.paradigm.xyz | bash
+```
+sudo dnf install git-all
+curl -L https://foundry.paradigm.xyz | bash
+```
 
 You know you already have them installed correctly if you run:
 * `git --version` and get a response `git version x.x.x`
 * `forge --version` and get a response like `forge 0.2.0 (816e00b 2023-03-16T00:05:26.396218Z)`
 
 ## Quickstart
-'git clone https://github.com/saracen75/foundry-defi-stablecoin-f23
-`cd foundry-defi-stablecoin-f23
-`forge build
+```
+git clone https://github.com/saracen75/foundry-defi-stablecoin-f23
+cd foundry-defi-stablecoin-f23
+forge build
+```
 
 ## Testing
 A word about the tests setup. Almost every test is a fuzz-test with random input variables. They are however stateless fuzz tests. No invariant tests are included in this repo.
@@ -36,15 +42,19 @@ Also, the `runs` are set to 1000 in the `foundry.toml`. Modify as you see fit.
 This project uses [forge-std](https://github.com/foundry-rs/forge-std), [Chainlink Brownie Contracts](https://github.com/smartcontractkit/chainlink-brownie-contracts), [Openzeppelin Contracts](https://github.com/OpenZeppelin/openzeppelin-contracts).
 
 Installation
-`forge install foundry-rs/forge-std --no-commit
-`forge install smartcontractkit/chainlink-brownie-contracts --no-commit
-`forge install OpenZeppelin/openzeppelin-contracts --no-commit
+```
+forge install foundry-rs/forge-std --no-commit
+forge install smartcontractkit/chainlink-brownie-contracts --no-commit
+forge install OpenZeppelin/openzeppelin-contracts --no-commit
+```
 
 Then, update your `foundry.toml file`.
-`remappings = [
-`    '@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts/src',
-`    '@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/'
-`]
+```
+remappings = [
+    '@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts/src',
+    '@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/'
+]
+```
 
 # Stablecoin Mechanism
 ## Anchored or Pegged to 1.00 USD
