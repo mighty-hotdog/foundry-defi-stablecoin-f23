@@ -13,9 +13,12 @@ import {Script} from "forge-std/Script.sol";
  */
 contract MockAggregatorV3 is Script {
   string public s_envLabelToRead;
+  bool public useAltPrice;
+  int256 public alternatePrice;
 
   constructor(string memory envLabelToRead) {
     s_envLabelToRead = envLabelToRead;
+    useAltPrice = false;
   }
 
   function decimals() external view returns (uint8) {
@@ -34,36 +37,53 @@ contract MockAggregatorV3 is Script {
 
   function getRoundData(
     uint80 _roundId
-  ) external view returns (
+    ) external view returns (
     uint80 roundId, 
     int256 answer, 
     uint256 startedAt, 
     uint256 updatedAt, 
     uint80 answeredInRound) 
-    {
-      return (
-        _roundId,
-        vm.envInt(s_envLabelToRead),
-        uint256(1111),
-        uint256(2222),
-        uint80(1)
-      );
-    }
+  {
+    int256 price;
+    if (useAltPrice) {price = alternatePrice;}
+    else {price = vm.envInt(s_envLabelToRead);}
+    return (
+      _roundId,
+      price,
+      uint256(1111),
+      uint256(2222),
+      uint80(1)
+    );
+  }
 
-  function latestRoundData()
+  function latestRoundData() 
     external view returns (
         uint80 roundId, 
         int256 answer, 
         uint256 startedAt, 
         uint256 updatedAt, 
         uint80 answeredInRound)
-    {
-      return (
-        uint80(1),
-        vm.envInt(s_envLabelToRead),
-        uint256(1111),
-        uint256(2222),
-        uint80(1)
-      );
-    }
+  {
+    int256 price;
+    if (useAltPrice) {price = alternatePrice;}
+    else {price = vm.envInt(s_envLabelToRead);}
+    return (
+      uint80(1),
+      price,
+      uint256(1111),
+      uint256(2222),
+      uint80(1)
+    );
+  }
+
+  function useAltPriceTrue(int256 altPrice) external 
+  {
+    alternatePrice = altPrice;
+    useAltPrice = true;
+  }
+
+  function useAltPriceFalse() external 
+  {
+    useAltPrice = false;
+  }
 }

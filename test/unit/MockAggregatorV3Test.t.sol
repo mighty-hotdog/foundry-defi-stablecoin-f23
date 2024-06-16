@@ -16,7 +16,7 @@ contract MockAggregatorV3Test is Test, Script {
 
     /* Test Variables to check against */
     string private constant ENV_LABEL_TO_READ = "CHAINLINK_MOCK_PRICE_FEED_ANSWER_ETH_USD";
-    uint256 private constant priceFeedAnswer = 4000*1e8;    // 4,000 USD * 1e8
+    int256 private constant priceFeedAnswer = 4000*1e8;     // 4,000 USD * 1e8
                                                             // where 1e8 = precision of Chainlink Price Feed for ETH/USD
     uint8 private constant priceFeedPrecision = 8;
     string private constant descriptionOfMockDatafeed = "MockAggregatorV3";
@@ -60,7 +60,7 @@ contract MockAggregatorV3Test is Test, Script {
     ////////////////////////////////////////////////////////////////////
     function testGetRoundData(uint80 randomRoundId) external view {
         (uint256 roundId,int256 answer,,,) = mock.getRoundData(randomRoundId);
-        assert((roundId == randomRoundId) && (answer == int256(priceFeedAnswer)));
+        assert((roundId == randomRoundId) && (answer == priceFeedAnswer));
     }
 
     ////////////////////////////////////////////////////////////////////
@@ -68,6 +68,33 @@ contract MockAggregatorV3Test is Test, Script {
     ////////////////////////////////////////////////////////////////////
     function testLatestRoundData() external view {
         (,int256 answer,,,) = mock.latestRoundData();
-        assert(answer == int256(priceFeedAnswer));
+        assert(answer == priceFeedAnswer);
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for useAltPriceTrue()
+    ////////////////////////////////////////////////////////////////////
+    function testUseAltPriceTrue(int256 price) external {
+        vm.assume(price != priceFeedAnswer);
+        (,int256 answer,,,) = mock.latestRoundData();
+        assert(answer == priceFeedAnswer);
+        mock.useAltPriceTrue(price);
+        (,answer,,,) = mock.latestRoundData();
+        assert(answer == price);
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    // Unit tests for useAltPriceFalse()
+    ////////////////////////////////////////////////////////////////////
+    function testUseAltPriceFalse(int256 price) external {
+        vm.assume(price != priceFeedAnswer);
+        (,int256 answer,,,) = mock.latestRoundData();
+        assert(answer == priceFeedAnswer);
+        mock.useAltPriceTrue(price);
+        (,answer,,,) = mock.latestRoundData();
+        assert(answer == price);
+        mock.useAltPriceFalse();
+        (,answer,,,) = mock.latestRoundData();
+        assert(answer == priceFeedAnswer);
     }
 }

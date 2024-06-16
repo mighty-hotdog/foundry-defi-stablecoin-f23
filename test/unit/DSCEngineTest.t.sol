@@ -9,6 +9,7 @@ import {DeployDecentralizedStableCoin} from "../../script/DeployDecentralizedSta
 import {DeployDSCEngine} from "../../script/DeployDSCEngine.s.sol";
 import {ChainConfigurator} from "../../script/ChainConfigurator.s.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
+import {MockAggregatorV3} from "../../test/mocks/MockAggregatorV3.sol";
 
 contract DSCEngineTest is Test {
     DecentralizedStableCoin public coin;
@@ -1310,6 +1311,149 @@ contract DSCEngineTest is Test {
             mintAmount,
             0));
         engine.liquidate(liquidateTarget);
+    }
+    function testLiquidateCannotBeLiquidated(
+        address liquidateTarget,
+        uint256 depositAmountWeth,
+        uint256 depositAmountWbtc,
+        uint256 mintAmount
+        ) external skipIfNotOnAnvil
+    {
+        (address weth,address wbtc,,,,) = config.s_activeChainConfig();
+        vm.assume(liquidateTarget != address(0));
+        vm.assume(liquidateTarget != address(engine));
+        assertEq(address(engine),coin.owner());
+        vm.assume(liquidateTarget != USER); // USER is the liquidator who calls liquidate()
+        uint256 maxDepositAmount = 1e9; // 1 billion collateral tokens
+        depositAmountWeth = bound(depositAmountWeth,1,maxDepositAmount);
+        depositAmountWbtc = bound(depositAmountWbtc,1,maxDepositAmount-depositAmountWeth+1);
+        uint256 threshold = engine.getThresholdLimitPercent();
+        uint256 fractional = engine.getFractionRemovalMultiplier();
+        uint256 valueOfDeposits = engine.convertToUsd(weth,depositAmountWeth) 
+            + engine.convertToUsd(wbtc,depositAmountWbtc);
+        uint256 maxMintAmount = valueOfDeposits * threshold / fractional;
+        mintAmount = bound(mintAmount,1,maxMintAmount);
+
+        ERC20Mock(weth).mint(liquidateTarget,depositAmountWeth);
+        ERC20Mock(wbtc).mint(liquidateTarget,depositAmountWbtc);
+        vm.startPrank(liquidateTarget);
+        ERC20Mock(weth).approve(address(engine),depositAmountWeth);
+        ERC20Mock(wbtc).approve(address(engine),depositAmountWbtc);
+        engine.depositCollateral(weth,depositAmountWeth);
+        engine.depositCollateralMintDSC(wbtc,depositAmountWbtc,mintAmount);
+        vm.stopPrank();
+        // note that USER is the liquidator calling liquidate()
+        vm.prank(address(engine));
+        coin.mint(USER,mintAmount);
+        assertEq(coin.balanceOf(USER),mintAmount);
+        // no manipulation of collateral price here, so user liquidateTarget still within
+        //  threshold limit and cannot be liquidated
+
+        vm.startPrank(USER);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(
+                    keccak256("DSCEngine__CannotBeLiquidated(address)")),
+            liquidateTarget));
+        engine.liquidate(liquidateTarget);
+        vm.stopPrank();
+    }
+    function testLiquidateStateCorrectlyUpdated(
+        uint256 depositAmountWeth,
+        uint256 depositAmountWbtc,
+        uint256 mintAmount,
+        address liquidateTarget
+        ) external skipIfNotOnAnvil
+    {
+        (
+            address weth,
+            address wbtc,
+            address wethPriceFeed,
+            address wbtcPriceFeed,,
+        ) = config.s_activeChainConfig();
+        {
+            vm.assume(liquidateTarget != address(0));
+            vm.assume(liquidateTarget != address(engine));
+            assertEq(address(engine),coin.owner());
+            vm.assume(liquidateTarget != USER); // USER is the liquidator who calls liquidate()
+            uint256 maxDepositAmount = 1e9; // 1 billion collateral tokens
+            depositAmountWeth = bound(depositAmountWeth,1,maxDepositAmount);
+            depositAmountWbtc = bound(depositAmountWbtc,1,maxDepositAmount-depositAmountWeth+1);
+            uint256 threshold = engine.getThresholdLimitPercent();
+            uint256 fractional = engine.getFractionRemovalMultiplier();
+            uint256 valueOfDeposits = engine.convertToUsd(weth,depositAmountWeth) 
+                + engine.convertToUsd(wbtc,depositAmountWbtc);
+            uint256 maxMintAmount = valueOfDeposits * threshold / fractional;
+            mintAmount = maxMintAmount;
+            //mintAmount = bound(mintAmount,1,maxMintAmount);
+
+            ERC20Mock(weth).mint(liquidateTarget,depositAmountWeth);
+            ERC20Mock(wbtc).mint(liquidateTarget,depositAmountWbtc);
+            vm.startPrank(liquidateTarget);
+            ERC20Mock(weth).approve(address(engine),depositAmountWeth);
+            ERC20Mock(wbtc).approve(address(engine),depositAmountWbtc);
+            engine.depositCollateral(weth,depositAmountWeth);
+            engine.depositCollateralMintDSC(wbtc,depositAmountWbtc,mintAmount);
+            vm.stopPrank();
+            // note that USER is the liquidator calling liquidate()
+            vm.prank(address(engine));
+            coin.mint(USER,mintAmount);
+            vm.prank(USER);
+            coin.approve(address(engine),mintAmount);
+            assertEq(coin.balanceOf(USER),mintAmount);
+        }
+
+        // collect pre-liquidate values
+        vm.startPrank(liquidateTarget);
+        uint256 userMintsBefore = engine.getMints();
+        uint256 userDepositWethBefore = engine.getDepositAmount(weth);
+        uint256 userDepositWbtcBefore = engine.getDepositAmount(wbtc);
+        // For the given number of deposited collaterals, after the price manipulation,
+        //  the value of deposits is not the same as before. Have to calc the value of
+        //  deposits from *after* the price manipulation has happened
+        //uint256 userTotalDepositValueBefore = engine.getDepositsValueInUsd();
+        vm.stopPrank();
+        uint256 liquidatorWethBalanceBefore = ERC20Mock(weth).balanceOf(USER);
+        uint256 liquidatorWbtcBalanceBefore = ERC20Mock(wbtc).balanceOf(USER);
+        uint256 liquidatorDscBalanceBefore = coin.balanceOf(USER);
+        uint256 dscTotalSupplyBefore = coin.totalSupply();
+
+        // manipulate collateral price here, so user liquidateTarget breaches
+        //  threshold limit and become liquidateable
+        MockAggregatorV3(wethPriceFeed).useAltPriceTrue(200000000000);  // 1 wETH = 2000 USD
+        MockAggregatorV3(wbtcPriceFeed).useAltPriceTrue(3400000000000); // 1 wBTC = 34000 USD
+        // calc value of deposits here *after* the price manipulation, note that this is 
+        //  still the before-liquidation value of deposits
+        vm.prank(liquidateTarget);
+        uint256 userTotalDepositValueBefore = engine.getDepositsValueInUsd();
+        
+        // liquidate and do the tests
+        vm.startPrank(USER);
+        // check for emit
+        vm.expectEmit(true,true,true,false,address(engine));
+        emit DSCEngine.Liquidated(liquidateTarget,userMintsBefore,userTotalDepositValueBefore);
+        engine.liquidate(liquidateTarget);
+        vm.stopPrank();
+        vm.startPrank(liquidateTarget);
+        // check that target mints/debt is zeroed
+        assertEq(engine.getMints(),0);
+        // check that all target deposits are zeroed
+        assertEq(engine.getDepositAmount(weth),0);  // weth deposits
+        assertEq(engine.getDepositAmount(wbtc),0);  // wbtc deposits
+        assertEq(engine.getDepositsValueInUsd(),0); // total deposits value
+        vm.stopPrank();
+        // check that liquidator weth balance correctly increased
+        assertEq(
+            ERC20Mock(weth).balanceOf(USER),
+            liquidatorWethBalanceBefore + userDepositWethBefore);
+        // check that liquidator wbtc balance correctly increased
+        assertEq(
+            ERC20Mock(wbtc).balanceOf(USER),
+            liquidatorWbtcBalanceBefore + userDepositWbtcBefore);
+        // check that liquidator DSC balance correctly drawn down
+        assertEq(coin.balanceOf(USER),liquidatorDscBalanceBefore - userMintsBefore);
+        // check that DSC total supply correctly drawn down
+        assertEq(coin.totalSupply(),dscTotalSupplyBefore - userMintsBefore);
     }
 
     ////////////////////////////////////////////////////////////////////

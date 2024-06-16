@@ -527,6 +527,7 @@ contract DSCEngine is ReentrancyGuard {
         address collateralTokenAddress,
         uint256 requestedRedeemAmount
         ) external 
+        nonReentrant
     {
         _burnDSC(msg.sender,msg.sender,requestedBurnAmount);
         _redeemCollateral(msg.sender,msg.sender,collateralTokenAddress,requestedRedeemAmount);
@@ -549,7 +550,11 @@ contract DSCEngine is ReentrancyGuard {
      *              3. perform the actual token transfer
      *  @dev    user is msg.sender.
      */
-    function redeemCollateral(address collateralTokenAddress,uint256 requestedRedeemAmount) external {
+    function redeemCollateral(
+        address collateralTokenAddress,
+        uint256 requestedRedeemAmount
+        ) external 
+        nonReentrant {
         _redeemCollateral(msg.sender,msg.sender,collateralTokenAddress,requestedRedeemAmount);
     }
 
@@ -568,7 +573,7 @@ contract DSCEngine is ReentrancyGuard {
      *              4. DSCEngine performs the actual burn
      *  @dev    user is msg.sender.
      */
-    function burnDSC(uint256 requestedBurnAmount) external {
+    function burnDSC(uint256 requestedBurnAmount) external nonReentrant {
         _burnDSC(msg.sender,msg.sender,requestedBurnAmount);
     }
 
@@ -649,12 +654,16 @@ contract DSCEngine is ReentrancyGuard {
         }
         uint256 numerator = valueOfDeposits * i_thresholdLimitPercent;
         uint256 denominator = valueOfDscMints * FRACTION_REMOVAL_MULTIPLIER;
-        if (denominator >= numerator) {
+        if (numerator >= denominator) {
             revert DSCEngine__CannotBeLiquidated(userToLiquidate);
         }
 
+        /*
         // liquidated user debt zeroed /////////////////////////////////////////////
         s_userToDscMints[userToLiquidate] = 0;
+        */
+        // liquidator burns DSC tokens + zeroes liquidated user's debt /////////////
+        _burnDSC(msg.sender,userToLiquidate,valueOfDscMints);
         for(uint256 i=0;i<s_allowedCollateralTokens.length;++i) {
             // liquidator redeems all collaterals //////////////////////////////////
             _redeemCollateral(
@@ -666,8 +675,6 @@ contract DSCEngine is ReentrancyGuard {
             delete s_userToCollateralDeposits[userToLiquidate][s_allowedCollateralTokens[i]];
         }
         emit Liquidated(userToLiquidate,valueOfDscMints,valueOfDeposits);
-        // liquidator burns DSC tokens /////////////////////////////////////////////
-        _burnDSC(msg.sender,userToLiquidate,valueOfDscMints);
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -739,8 +746,7 @@ contract DSCEngine is ReentrancyGuard {
         moreThanZero(requestedRedeemAmount) 
         onlyValidTokens(collateralTokenAddress) 
         sufficientBalance(from,collateralTokenAddress,requestedRedeemAmount) 
-        withinRedeemLimitSimple(from,collateralTokenAddress,requestedRedeemAmount) 
-        nonReentrant 
+        withinRedeemLimitSimple(from,collateralTokenAddress,requestedRedeemAmount)  
     {
         // 1st update state and send emits
         s_userToCollateralDeposits[from][collateralTokenAddress] -= requestedRedeemAmount;
@@ -782,8 +788,7 @@ contract DSCEngine is ReentrancyGuard {
         uint256 requestedBurnAmount
         ) internal 
         moreThanZero(requestedBurnAmount) 
-        sufficientBalance(dscFrom,i_dscToken,requestedBurnAmount) 
-        nonReentrant 
+        sufficientBalance(dscFrom,i_dscToken,requestedBurnAmount)  
     {
         // 1st update state and send emits
         s_userToDscMints[onBehalfOf] -= requestedBurnAmount;
