@@ -31,8 +31,12 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__TokenAddressCannotBeZero();
     error DSCEngine__PriceFeedAddressCannotBeZero();
     error DSCEngine__PriceFeedPrecisionCannotBeZero();
-    // this error will never hit because ERC20's transfer() and transferFrom() always return true
-    //error DSCEngine__TransferFailed(address from,address to,address collateralTokenAddress,uint256 amount);
+    // This error will never hit because ERC20's transfer() and transferFrom() always return true.
+    //  However in case there is an update of ERC20 implementation library, should still check for
+    //  the return bool and throw this error if failed. Funds transfer is an activity of critical
+    //  importance. All measures should be taken to ensure it executes properly and that fails are 
+    //  handled properly.
+    error DSCEngine__TransferFailed(address from,address to,address collateralTokenAddress,uint256 amount);
     error DSCEngine__RequestedMintAmountBreachesUserMintLimit(
         address user,uint256 requestedMintAmount,uint256 maxSafeMintAmount);
     error DSCEngine__DataFeedError(address tokenAddress, address priceFeedAddress, int answer);
@@ -93,22 +97,77 @@ contract DSCEngine is ReentrancyGuard {
      */
     uint256 public constant FRACTION_REMOVAL_MULTIPLIER = 100;
 
-    // array of all allowed collateral tokens
+    /**
+     *  @notice s_allowedCollateralTokens
+     *          array of all allowed collateral tokens
+     *  @dev    IMPROVEMENTS:
+     *          Because this is set at construction and then never changed, it should be made immutable.
+     *          Since Solidity doesn't at this time support immutable arrays or mappings, the workaround
+     *          is to only access it from an external view-only function. This is already done per 
+     *          original code.
+     *          Similiarly, its length which is asked for frequently, should be cached in an immutable 
+     *          variable and accessed from an external view-only function. Also already done per original
+     *          code.
+     *          From within this contract, direct access saves alittle gas and is probably fine.
+     *  @dev    IMPROVEMENTS:
+     *          This implementation of DSCEngine uses only 2 collateral tokens. In future when alot more 
+     *          collateral tokens are used, a mapping should be used instead to save gas. Access from a
+     *          view-only function that checks the input index vs the total number of tokens in the mapping.
+     *          eg: mapping(uint256 index => address token) private s_allowedCollateralTokens;
+     *              uint256 private immutable i_allowedCollateralTokens_Total;
+     *              function allowedCollateralToken(uint256 index) public {}
+     */
     address[] private s_allowedCollateralTokens;
-    // maps each allowed collateral token to its respective price feed and the associated precision of the price feed
+    uint256 private immutable i_allowedCollateralTokens_ArrayLength;
+
+    /**
+     *  @notice s_tokenToPriceFeed
+     *          maps each allowed collateral token to its respective price feed and the associated 
+     *          precision
+     *  @dev    IMPROVEMENTS:
+     *          Because this is set at construction and then never changed, it should be made immutable.
+     *          Since Solidity doesn't at this time support immutable arrays or mappings, the workaround
+     *          is to only access it from a view-only function. Alrdy done in original code.
+     *  @dev    SECURITY CONCERN:
+     *          The developer can introduce a new version of this contract that allows manipulation of the 
+     *          price feed, facilitating rugpull of users.
+     *          Question: How to make this truly unchangeable after construction?
+     *          Answer: At this time there is no solution for this. Making it private and not internal does
+     *                  close this vector to malicious inheritor contracts.
+     */
     mapping(address allowedTokenAddress => PriceFeed tokenPriceFeed) private s_tokenToPriceFeed;
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /* State Variables - User Records & Information *////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // maps each existing user to each collateral token, to the amount of deposit he currently holds in the system 
-    //  for that token.
-    // Question: Is it better here to use a mapping or an array of structs?
+    /**
+     *  @notice s_userToCollateralDeposits
+     *          maps each user to the amount of deposits he currently holds for each collateral token in the system.
+     *  @dev    SECURITY CONCERN:
+     *          This most definitely must be protected vs reentrancy. How?
+     *          1 way is to ONLY access this via reentrancy-guarded access functions. All access whether from within 
+     *          this contract or outside or inherited contracts, must go thru these functions.
+     *  @dev    Question: Is it better here to use a mapping or an array of structs?
+     *          Answer: Array access exponentially increases with array size, whereas access to mapping remains 
+     *                  constant. Hence for bigger record numbers, better to use a mapping.
+     */
     mapping(address user => mapping(address collateralTokenAddress => uint256 amountOfCurrentDeposit)) 
         private s_userToCollateralDeposits;
-    // maps each existing user to the amount of DSC tokens he has minted (ie: borrowed), that has not yet been burned 
-    //  (ie: returned).
-    // Question: Is it better here to use a mapping or an array of structs?
+    /**
+     *  @notice s_userToDscMints
+     *          maps each user to the amount of DSC tokens he has minted (ie: borrowed), that has not yet been 
+     *          burned (ie: returned).
+     *          Note that the user may not actually hold the DSC in his token balance, but that he has minted it 
+     *          at some point and has not yet burned it.
+     *          ie: DecentralizedStableCoin.balanceOf(USER) may not equal DSCEngine.getMints().
+     *  @dev    SECURITY CONCERN:
+     *          This most definitely must be protected vs reentrancy. How?
+     *          1 way is to ONLY access this via reentrancy-guarded access functions. All accessors whether from
+     *          within this contract or outside or inherited contracts, must go thru these access functions.
+     *  @dev    Question: Is it better here to use a mapping or an array of structs?
+     *          Answer: Array access exponentially increases with array size, whereas access to mapping remains 
+     *                  constant. Hence for bigger record numbers, better to use a mapping.
+     */
     mapping(address user => uint256 dscAmountHeld) private s_userToDscMints;
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -289,6 +348,7 @@ contract DSCEngine is ReentrancyGuard {
                 precision: priceFeedPrecision[i]});
             s_allowedCollateralTokens.push(allowedCollateralTokenAddresses[i]);
         }
+        i_allowedCollateralTokens_ArrayLength = allowedCollateralTokenAddresses.length;
         i_dscToken = dscToken;
         i_thresholdLimitPercent = thresholdPercent;
     }
@@ -341,8 +401,8 @@ contract DSCEngine is ReentrancyGuard {
         //      c. amount
         //      d. current price
         //      e. current value in usd
-        Holding[] memory deposits = new Holding[](s_allowedCollateralTokens.length);
-        for(uint256 i=0;i<s_allowedCollateralTokens.length;i++) {
+        Holding[] memory deposits = new Holding[](i_allowedCollateralTokens_ArrayLength);
+        for(uint256 i=0;i<i_allowedCollateralTokens_ArrayLength;i++) {
             address collateral = s_allowedCollateralTokens[i];
             uint256 depositAmount = s_userToCollateralDeposits[msg.sender][collateral];
             uint256 price = convertToUsd(collateral,1);
@@ -471,8 +531,6 @@ contract DSCEngine is ReentrancyGuard {
         //  of tokens. This means DSCEngine is the "spender" that the user needs to approve 1st with an
         //  appropriate allowance of the token to be transferred.
         // In this case, the "to address" to transfer the tokens to is the DSCEngine itself.
-        IERC20(collateralTokenAddress).transferFrom(msg.sender,address(this),requestedDepositAmount);
-        /*
         bool success = IERC20(collateralTokenAddress).transferFrom(msg.sender,address(this),requestedDepositAmount);
         if (!success) {
             // Question: Will this revert also rollback the earlier statements in this function call?
@@ -492,7 +550,6 @@ contract DSCEngine is ReentrancyGuard {
             //  revert state changes. It merely allows the caller to react to the revert condition.
             revert DSCEngine__TransferFailed(msg.sender,address(this),collateralTokenAddress,requestedDepositAmount);
         }
-        */
     }
 
     /**
@@ -693,7 +750,7 @@ contract DSCEngine is ReentrancyGuard {
 
         // liquidator burns DSC tokens + zeroes liquidatee's debt //////////////////
         _burnDSC(msg.sender,userToLiquidate,valueOfDscMints);
-        for(uint256 i=0;i<s_allowedCollateralTokens.length;++i) {
+        for(uint256 i=0;i<i_allowedCollateralTokens_ArrayLength;++i) {
             // liquidator redeems all liquidatee's deposited collaterals ///////////
             _redeemCollateral(
                 userToLiquidate,
@@ -725,7 +782,7 @@ contract DSCEngine is ReentrancyGuard {
         // zero address user has no deposits with the system
         if (user == address(0)) {return 0;}
         // loop through all allowed collateral tokens
-        for(uint256 i=0;i<s_allowedCollateralTokens.length;i++) {
+        for(uint256 i=0;i<i_allowedCollateralTokens_ArrayLength;i++) {
             // obtain deposit amount held by user in each collateral token
             uint256 depositHeld = s_userToCollateralDeposits[user][s_allowedCollateralTokens[i]];
             if (depositHeld > 0) {
@@ -786,15 +843,11 @@ contract DSCEngine is ReentrancyGuard {
         emit CollateralRedeemed(from,collateralTokenAddress,requestedRedeemAmount);
 
         // then perform actual action to effect the state change
-        IERC20(collateralTokenAddress).transfer(to,requestedRedeemAmount);
-        //bool success = IERC20(collateralTokenAddress).transferFrom(address(this),to,requestedRedeemAmount);
-        /*
         bool success = IERC20(collateralTokenAddress).transfer(to,requestedRedeemAmount);
         // will never hit
         if (!success) {
             revert DSCEngine__TransferFailed(address(this),to,collateralTokenAddress,requestedRedeemAmount);
         }
-        */
     }
 
     /**
@@ -831,13 +884,10 @@ contract DSCEngine is ReentrancyGuard {
 
         // then perform actual action to effect the state change
         // 1st transfer DSC to be burned from user to engine
-        IERC20(i_dscToken).transferFrom(dscFrom,address(this),requestedBurnAmount);
-        /*
         bool success = IERC20(i_dscToken).transferFrom(dscFrom,address(this),requestedBurnAmount);
         if (!success) {
             revert DSCEngine__TransferFailed(dscFrom,address(this),i_dscToken,requestedBurnAmount);
         }
-        */
         // then have the engine burn the DSC
         DecentralizedStableCoin(i_dscToken).burn(requestedBurnAmount);
     }
@@ -956,12 +1006,12 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     function getAllowedCollateralTokensArrayLength() external view returns (uint256) {
-        return s_allowedCollateralTokens.length;
+        return i_allowedCollateralTokens_ArrayLength;
     }
     function getAllowedCollateralTokens(uint256 index) external view returns (address) 
     {
-        if (index >= s_allowedCollateralTokens.length) {
-            revert DSCEngine__OutOfArrayRange(s_allowedCollateralTokens.length-1,index);
+        if (index >= i_allowedCollateralTokens_ArrayLength) {
+            revert DSCEngine__OutOfArrayRange(i_allowedCollateralTokens_ArrayLength-1,index);
         }
         return s_allowedCollateralTokens[index];
     }

@@ -94,7 +94,7 @@ contract DecentralizedStableCoin is ERC20Burnable, Ownable {
      *              _amount is zero
      *              caller '_to' is a zero address      (checked by ERC20's _update() function)
      */
-    function mint(address _to, uint256 _amount) public onlyOwner moreThanZero(_amount) returns (bool) {
+    function mint(address _to, uint256 _amount) public onlyOwner moreThanZero(_amount) {
         /*
         // ERC20's _mint() already checks for zero address receiver and throws an appropriate revert
         if (_to == address(0)) {
@@ -107,6 +107,5 @@ contract DecentralizedStableCoin is ERC20Burnable, Ownable {
         // this TokenMinted() event emit is needed. ERC20's _mint() doesn't emit any mint events.
         //  ERC20's _update(), which _mint() calls, only emits a transfer() event
         emit TokenMinted(_to,_amount);
-        return true;
     }
 }
