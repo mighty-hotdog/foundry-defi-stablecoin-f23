@@ -16,4 +16,3 @@ docs/
 
 # omits for security
 .password
-.gitignore
