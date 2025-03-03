@@ -152,5 +152,6 @@ Wrote alot of Solidity. Learned a ton doing this course.
     * using tools like Slither, SMT Checker, etc
 4. ~~Update the .env file with testing and deployment accounts info, eg: SEPOLIA_TESTNET_KEY_SENDER, PASSWORD_FILE~~ DONE
 5. ~~Deploy to testnet.~~ DONE
-6. Invariant test suite.
-7. Add frontend for users to interact with contracts.
+6. Improve test coverage to ~100%.
+7. Invariant test suite.
+8. Add frontend for users to interact with contracts.
