@@ -151,7 +151,6 @@ Wrote alot of Solidity. Learned a ton doing this course.
     * easy test deployment and tests running
     * using tools like Slither, SMT Checker, etc
 4. ~~Update the .env file with testing and deployment accounts info, eg: SEPOLIA_TESTNET_KEY_SENDER, PASSWORD_FILE~~ DONE
-5. Deploy to testnet and run tests there. *not enuff testnet tokens, find a soln for this*
-6. Upgrade DSCEngine contract to allow a basket of collateral tokens. *find out what are the main stablecoins avail and choose from amongst*
-7. Add frontend to allow users to interact with contracts.
-8. ~~Add sweeper function to DSCEngine contract to "sweep-up" all token fractionals.~~ CANCELLED *useless function*
+5. ~~Deploy to testnet.~~ DONE
+6. Invariant test suite.
+7. Add frontend for users to interact with contracts.
