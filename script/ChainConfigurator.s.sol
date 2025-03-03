@@ -5,7 +5,7 @@ pragma solidity ^0.8.18;
 import {Script} from "forge-std/Script.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 import {MockAggregatorV3} from "../test/mocks/MockAggregatorV3.sol";
-import {AggregatorV3Interface} from "@chainlink/contracts/v0.8/interfaces/AggregatorV3Interface.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {FeedRegistryInterface} from "@chainlink/contracts/v0.8/interfaces/FeedRegistryInterface.sol";
 import {Denominations} from "@chainlink/contracts/v0.8/Denominations.sol";
 
