@@ -7,6 +7,7 @@ import {DecentralizedStableCoin} from "../../src/DecentralizedStableCoin.sol";
 import {DSCEngine} from "../../src/DSCEngine.sol";
 import {ChainConfigurator} from "../../script/ChainConfigurator.s.sol";
 import {DeployDSC} from "../../script/DeployDSC.s.sol";
+import {ChangeOwner} from "../../script/ChangeOwner.s.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 import {MockAggregatorV3} from "../../test/mocks/MockAggregatorV3.sol";
 
@@ -15,6 +16,7 @@ contract DSCEngineAltTest is Test {
     DSCEngine public engine;
     ChainConfigurator public config;
     DeployDSC public deployer;
+    ChangeOwner public changeOwner;
     address public USER;
 
     ///////////////////////////////////////////////////////////////////////////////////
@@ -50,6 +52,25 @@ contract DSCEngineAltTest is Test {
         // deploy coin and engine together
         deployer = new DeployDSC();
         (coin,engine,config) = deployer.run();
+
+        // change ownership of coin to engine
+        // this project assumes deployment only to mainnet, sepolia testnet, and Anvil
+        if (block.chainid == vm.envUint("ETH_MAINNET_CHAINID")) {
+            // for testnet and mainnet we need to wait ~15 seconds for the deployment
+            // transactions block to be confirmed 1st before calling the ChangeOwner script
+            changeOwner = new ChangeOwner();
+            changeOwner.run();
+        } else if (block.chainid == vm.envUint("ETH_SEPOLIA_CHAINID")) {
+            // for testnet and mainnet we need to wait ~15 seconds for the deployment
+            // transactions block to be confirmed 1st before calling the ChangeOwner script
+            changeOwner = new ChangeOwner();
+            changeOwner.run();
+        } else {
+            // these lines work only under Anvil where the deployment transactions
+            // block is confirmed fast enough to immediately do the ownership transfer
+            vm.prank(coin.owner());
+            coin.transferOwnership(address(engine));
+        }
 
         // prepare generic prank user; balances and approvals better to setup within 
         //  each test according to needs of situation

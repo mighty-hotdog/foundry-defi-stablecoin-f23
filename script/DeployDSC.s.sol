@@ -46,7 +46,13 @@ contract DeployDSC is Script {
             precision,
             address(coin),
             threshold);
-        coin.transferOwnership(address(engine));
+
+        // when deploying to mainnet or testnet, this transfer ownership call will fail because
+        //  the contract deployment transaction is still pending by the time of this call.
+        // solution is to wait for the block to be confirmed (~15 seconds) and then call the
+        //  transfer ownership from another script - ChangeOwner.s.sol - using the contract
+        //  addresses returned by this script
+        //coin.transferOwnership(address(engine));
         vm.stopBroadcast();
 
         return (coin,engine,config);
