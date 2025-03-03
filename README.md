@@ -154,4 +154,4 @@ Wrote alot of Solidity. Learned a ton doing this course.
 5. Deploy to testnet and run tests there. *not enuff testnet tokens, find a soln for this*
 6. Upgrade DSCEngine contract to allow a basket of collateral tokens. *find out what are the main stablecoins avail and choose from amongst*
 7. Add frontend to allow users to interact with contracts.
-8. Add sweeper function to DSCEngine contract to "sweep-up" all token fractionals.
+8. ~~Add sweeper function to DSCEngine contract to "sweep-up" all token fractionals.~~ CANCELLED *useless function*
