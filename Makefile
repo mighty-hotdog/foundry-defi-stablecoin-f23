@@ -14,7 +14,7 @@
 
 -include .env
 
-.PHONY: all test clean deploy deploytestnet deployanvil fund help install snapshot format anvil changeowner
+.PHONY: all test clean deploy deploytestnet deployanvil fund help install snapshot format anvil changeowner slither aderyn cloc
 
 DEFAULT_ANVIL_KEY := 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 
@@ -69,4 +69,8 @@ format :; forge fmt
 
 anvil :; anvil -m 'test test test test test test test test test test test junk' --steps-tracing --block-time 1
 
+slither :; slither . --config-file slither.config.json --checklist > ./artifacts/slither_report.md
 
+aderyn :; aderyn . -o ./artifacts/aderyn_report.md
+
+cloc :; cloc "./src" "./script" --by-file-by-lang --hide-rate --out=./artifacts/cloc_report

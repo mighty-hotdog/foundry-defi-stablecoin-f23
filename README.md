@@ -149,7 +149,7 @@ Wrote alot of Solidity. Learned a ton doing this course.
 3. Do up the Makefile, especially for:
     * ~~deployment onchain~~ DONE
     * easy test deployment and tests running
-    * using tools like Slither, SMT Checker, etc
+    * ~~using tools like Slither, SMT Checker, etc~~ DONE
 4. ~~Update the .env file with testing and deployment accounts info, eg: SEPOLIA_TESTNET_KEY_SENDER, PASSWORD_FILE~~ DONE
 5. ~~Deploy to testnet.~~ DONE
 6. Invariant test suite.
