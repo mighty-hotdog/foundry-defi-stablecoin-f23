@@ -123,6 +123,7 @@ Involves:
 * The Foundry tester goes thru each target handler contract, and for each run, based on configuration, calls These handler functions in random sequence, with state persisted across function calls. Every invariant test function is called after **each** handler test function call.
 
 ## Oracles Management
+### Mitigating Oracles Breaking
 Oracles do break at times. It is important that our systems that rely on them do not also break when they do.
 
 This is done by replacing the oracle price query call with a proxy function we define. This proxy function makes the same query call to the oracle, then checks the reply for staleness by comparing the updated-at time with the current block time. If the interval is greater than the refresh rates defined and published by the oracle itself, then the reply is stale. In this case, the proxy function reverts.
@@ -130,6 +131,13 @@ This is done by replacing the oracle price query call with a proxy function we d
 According to the Cyfrin Updraft course, the stablecoin system should be disabled at this point to prevent users from being harmed/exploited. The course leaves the rather serious issue of users having their funds locked up in the system as a challenge for students to try and solve. Gotta think abit more on that one...
 
 If the reply is found to be not stale, the proxy function passes the reply back out to the caller.
+
+### Selecting Suitable Oracles
+This project uses the Chainlink Price Feeds for ETH/USD and BTC/USD prices. However Chainlink Price Feeds update much too slowly - the docs list the heartbeat as 3600 seconds - which means each price update takes up to 1 hour for both ETH/USD and BTC/USD.
+
+Grok recommends Pyth Price Feeds with update frequency ~400ms.
+
+Will be implementing this into the project as an alternative to Chainlink Price Feeds.
 
 # Learnings and Takeaways
 Wrote alot of Solidity. Learned a ton doing this course.
@@ -152,5 +160,6 @@ Wrote alot of Solidity. Learned a ton doing this course.
     * ~~using tools like Slither, SMT Checker, etc~~ DONE
 4. ~~Update the .env file with testing and deployment accounts info, eg: SEPOLIA_TESTNET_KEY_SENDER, PASSWORD_FILE~~ DONE
 5. ~~Deploy to testnet.~~ DONE
-6. Invariant test suite.
-7. Add frontend for users to interact with contracts.
+6. Add invariant test suite.
+7. Add Pyth Price Feeds as alternative to Chainlink Price Feeds.
+8. Add frontend for users to interact with contracts.

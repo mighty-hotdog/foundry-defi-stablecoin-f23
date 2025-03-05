@@ -1364,17 +1364,18 @@ contract DSCEngineAltTest is Test {
     // Unit tests for _redeemCollateral()
     ////////////////////////////////////////////////////////////////////
     /*
+    The function @dev notes detail why these zero address checks are not required.
     function test_redeemFromZeroAddress(address to,address token,uint256 amount) external {
-        vm.expectRevert(DSCEngine.DSCEngine__UserCannotBeZero.selector);
+        vm.expectRevert(DSCEngine.DSCEngine__AddressCannotBeZero.selector);
         engine.expose_redeemCollateral(address(0),to,token,amount);
     }
     function test_redeemToZeroAddress(address from,address token,uint256 amount) external {
         vm.assume(from != address(0));
-        vm.expectRevert(DSCEngine.DSCEngine__UserCannotBeZero.selector);
+        vm.expectRevert(DSCEngine.DSCEngine__AddressCannotBeZero.selector);
         engine.expose_redeemCollateral(from,address(0),token,amount);
     }
     function test_redeemFromZeroAddressToZeroAddress(address token,uint256 amount) external {
-        vm.expectRevert(DSCEngine.DSCEngine__UserCannotBeZero.selector);
+        vm.expectRevert(DSCEngine.DSCEngine__AddressCannotBeZero.selector);
         engine.expose_redeemCollateral(address(0),address(0),token,amount);
     }
     */
@@ -1576,18 +1577,22 @@ contract DSCEngineAltTest is Test {
     // Unit tests for _burnDSC()
     ////////////////////////////////////////////////////////////////////
     /*
+    The function @dev notes detail why these zero address checks are not required.
     function test_burnFromZeroAddress(address onBehalfOf,uint256 amount) external {
         vm.assume(onBehalfOf != address(0));
-        vm.expectRevert(DSCEngine.DSCEngine__UserCannotBeZero.selector);
+        vm.assume(amount != 0);
+        vm.expectRevert(DSCEngine.DSCEngine__AddressCannotBeZero.selector);
         engine.expose_burnDSC(address(0),onBehalfOf,amount);
     }
     function test_burnOnBehalfOfZeroAddress(address dscFrom,uint256 amount) external {
         vm.assume(dscFrom != address(0));
-        vm.expectRevert(DSCEngine.DSCEngine__UserCannotBeZero.selector);
+        vm.assume(amount != 0);
+        vm.expectRevert(DSCEngine.DSCEngine__AddressCannotBeZero.selector);
         engine.expose_burnDSC(dscFrom,address(0),amount);
     }
     function test_burnFromZeroAddressOnBehalfOfZeroAddress(uint256 amount) external {
-        vm.expectRevert(DSCEngine.DSCEngine__UserCannotBeZero.selector);
+        vm.assume(amount != 0);
+        vm.expectRevert(DSCEngine.DSCEngine__AddressCannotBeZero.selector);
         engine.expose_burnDSC(address(0),address(0),amount);
     }
     */

@@ -24,6 +24,8 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__InvalidToken(address tokenAddress);
     error DSCEngine__ThresholdOutOfRange(uint256 threshold);
     error DSCEngine__AmountCannotBeZero();
+    // not needed as there are no checks
+    //error DSCEngine__AddressCannotBeZero();
     error DSCEngine__ConstructorInputParamsMismatch(
         uint256 lengthOfCollateralAddressesArray,
         uint256 lengthOfPriceFeedsArray,
@@ -198,6 +200,16 @@ contract DSCEngine is ReentrancyGuard {
         }
         _;
     }
+
+    /*
+    // modifier not needed, removed because checks may trigger stack-too-deep compile error
+    modifier nonZeroAddress(address addr) {
+        if (addr == address(0)) {
+            revert DSCEngine__AddressCannotBeZero();
+        }
+        _;
+    }
+    */
 
     /*
     // modifier restricts function caller to:
@@ -554,7 +566,7 @@ contract DSCEngine is ReentrancyGuard {
 
     /**
      *  @notice mintDSC()
-     *          for a user to call, to mint DSC on his own account.
+     *          for any user to call, to mint DSC on his own account.
      *          also called in convenience function depositCollateralMintDSC() in combination with depositCollateral().
      *  @param  requestedMintAmount amount of DSC token to be requested for mint
      *  @dev    checks performed:
@@ -818,6 +830,11 @@ contract DSCEngine is ReentrancyGuard {
      *              2. redemption is in allowed tokens
      *              3. sufficient balance exists in from user's collateral deposits
      *              4. from user's redeem limit is not breached with this redemption request
+     *  @dev    from and to are not checked for zero addresses because:
+     *              1. _redeemCollateral() is only called internally, by:
+     *                  a. burnDSCRedeemCollateral() and redeemCollateral() only w/ msg.sender that cannot be zero address
+     *                  b. liquidate() which already checks for userToLiquidate for zero address
+     *              2. performing the checks triggers stack-too-deep compile error
      *  @dev    reentrancy check not done here but in the parent functions that call this.
      *  @dev    zero user address checks not needed because ERC20 transfer() and transferFrom() 
      *          already perform these and will revert with appropriate reverts
@@ -860,6 +877,11 @@ contract DSCEngine is ReentrancyGuard {
      *  @dev    checks performed:
      *              1. burn amount is more than zero
      *              2. sufficient balance exists in dscFrom account
+     *  @dev    dscFrom and onBehalfOf are not checked for zero addresses because:
+     *              1. _burnDSC() is only called internally, by:
+     *                  a. burnDSCRedeemCollateral() and burnDSC() only w/ msg.sender that cannot be zero address
+     *                  b. liquidate() which already checks for userToLiquidate for zero address
+     *              2. performing the checks does not trigger stack-too-deep compile error here but it's good to avoid anyway
      *  @dev    reentrancy check not done here but in the parent functions that call this.
      *  @dev    zero user address checks not needed because ERC20 transfer() and transferFrom() 
      *          already perform these and will revert with appropriate reverts
