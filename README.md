@@ -160,6 +160,6 @@ Wrote alot of Solidity. Learned a ton doing this course.
     * ~~using tools like Slither, SMT Checker, etc~~ DONE
 4. ~~Update the .env file with testing and deployment accounts info, eg: SEPOLIA_TESTNET_KEY_SENDER, PASSWORD_FILE~~ DONE
 5. ~~Deploy to testnet.~~ DONE
-6. Add invariant test suite.
+6. ~~Add invariant test suite.~~ DONE
 7. Add Pyth Price Feeds as alternative to Chainlink Price Feeds.
 8. Add frontend for users to interact with contracts.
