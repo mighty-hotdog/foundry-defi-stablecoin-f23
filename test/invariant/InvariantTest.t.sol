@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.18;
 
-import {StdInvariant,Test} from "forge-std/Test.sol";
+import {StdInvariant,Test, console} from "forge-std/Test.sol";
 import {DecentralizedStableCoin} from "../../src/DecentralizedStableCoin.sol";
 import {DSCEngine} from "../../src/DSCEngine.sol";
 import {ChainConfigurator} from "../../script/ChainConfigurator.s.sol";
@@ -53,5 +53,11 @@ contract InvariantTest is StdInvariant, Test {
         //uint256 arrayLength = engine.getAllowedCollateralTokensArrayLength();
         //engine.getAllowedCollateralTokens(index % arrayLength);
         //engine.getPriceFeed(token);
+    }
+    function invariant_totalCollateralGTTotalDebt() external view {
+        // total value of deposited collateral in system must always be greater than total value of debt
+        console.log("totalCollateralValue = ",handler.totalCollateralValue());
+        console.log("totalDebtValue = ",handler.totalDebtValue());
+        assert(handler.totalCollateralValue() >= handler.totalDebtValue());
     }
 }
