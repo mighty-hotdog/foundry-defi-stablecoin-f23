@@ -764,11 +764,14 @@ contract DSCEngine is ReentrancyGuard {
         _burnDSC(msg.sender,userToLiquidate,valueOfDscMints);
         for(uint256 i=0;i<i_allowedCollateralTokens_ArrayLength;++i) {
             // liquidator redeems all liquidatee's deposited collaterals ///////////
-            _redeemCollateral(
-                userToLiquidate,
-                msg.sender,
-                s_allowedCollateralTokens[i],
-                s_userToCollateralDeposits[userToLiquidate][s_allowedCollateralTokens[i]]);
+            uint256 amountToRedeem = s_userToCollateralDeposits[userToLiquidate][s_allowedCollateralTokens[i]];
+            if (amountToRedeem > 0) {
+                _redeemCollateral(
+                    userToLiquidate,
+                    msg.sender,
+                    s_allowedCollateralTokens[i],
+                    amountToRedeem);
+            }
             // liquidatee's collateral deposits zeroed /////////////////////////////
             delete s_userToCollateralDeposits[userToLiquidate][s_allowedCollateralTokens[i]];
         }

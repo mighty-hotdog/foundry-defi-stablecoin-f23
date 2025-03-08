@@ -41,7 +41,7 @@ contract InvariantTest is StdInvariant, Test {
             coin.transferOwnership(address(engine));
         }
 
-        handler = new Handler(address(coin),address(engine));
+        handler = new Handler(address(coin),address(engine),address(config));
         targetContract(address(handler));
     }
 
