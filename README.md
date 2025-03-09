@@ -152,14 +152,5 @@ Wrote alot of Solidity. Learned a ton doing this course.
 * Gained a rudimentary grasp of smart contracts security.
 
 # Outstanding Tasks
-1. ~~Final bit of the tests for liquidate().~~ DONE
-2. ~~Update the deploy scripts.~~ DONE
-3. Do up the Makefile, especially for:
-    * ~~deployment onchain~~ DONE
-    * easy test deployment and tests running
-    * ~~using tools like Slither, SMT Checker, etc~~ DONE
-4. ~~Update the .env file with testing and deployment accounts info, eg: SEPOLIA_TESTNET_KEY_SENDER, PASSWORD_FILE~~ DONE
-5. ~~Deploy to testnet.~~ DONE
-6. ~~Add invariant test suite.~~ DONE
-7. Add Pyth Price Feeds as alternative to Chainlink Price Feeds.
-8. Add frontend for users to interact with contracts.
+1. Add Pyth Price Feeds as alternative to Chainlink Price Feeds.
+2. Add frontend for users to interact with contracts.
